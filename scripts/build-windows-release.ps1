@@ -8,6 +8,22 @@ $ErrorActionPreference = "Stop"
 # target paths, and path-safety helpers selected by the portable builder in this scope.
 . (Join-Path $PSScriptRoot "build-windows-portable.ps1")
 
+function Get-SHA256Hex {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+    } finally {
+      $sha256.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
 $bundleArgs = @("build", "--bundles", "nsis,msi", "--ci")
 if ($targetTriple) {
   $bundleArgs += @("--target", $targetTriple)
@@ -107,7 +123,7 @@ Remove-Item -LiteralPath $cliStage -Recurse -Force
 
 $releaseArtifacts = @($nsisAsset, $msiAsset, $portableAsset, $cliAsset)
 $checksumLines = foreach ($artifact in $releaseArtifacts | Sort-Object { Split-Path -Leaf $_ }) {
-  $hash = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+  $hash = Get-SHA256Hex -Path $artifact
   "$hash  $(Split-Path -Leaf $artifact)"
 }
 $checksumsPath = Join-Path $releaseAssetsDir "SHA256SUMS.txt"
