@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture",
+  "description": "Minimal permissions for Carbon's quick-capture window.",
+  "windows": ["capture"],
+  "remote": {
+    "urls": ["http://localhost:5173", "http://127.0.0.1:*"]
+  },
+  "permissions": ["core:window:allow-close"]
+}

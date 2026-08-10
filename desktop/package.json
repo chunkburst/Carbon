@@ -1,0 +1,16 @@
+{
+  "name": "carbon-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "portable:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-windows-portable.ps1",
+    "installer:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-windows-release.ps1",
+    "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-windows-release.ps1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

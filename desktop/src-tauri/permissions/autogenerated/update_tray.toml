@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-tray"
+description = "Enables the update_tray command without any pre-configured scope."
+commands.allow = ["update_tray"]
+
+[[permission]]
+identifier = "deny-update-tray"
+description = "Denies the update_tray command without any pre-configured scope."
+commands.deny = ["update_tray"]

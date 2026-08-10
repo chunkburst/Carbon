@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-notification-sound"
+description = "Enables the clear_notification_sound command without any pre-configured scope."
+commands.allow = ["clear_notification_sound"]
+
+[[permission]]
+identifier = "deny-clear-notification-sound"
+description = "Denies the clear_notification_sound command without any pre-configured scope."
+commands.deny = ["clear_notification_sound"]

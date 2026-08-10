@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-play-notification-sound"
+description = "Enables the play_notification_sound command without any pre-configured scope."
+commands.allow = ["play_notification_sound"]
+
+[[permission]]
+identifier = "deny-play-notification-sound"
+description = "Denies the play_notification_sound command without any pre-configured scope."
+commands.deny = ["play_notification_sound"]

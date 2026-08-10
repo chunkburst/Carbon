@@ -1,0 +1,54 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Carbon",
+  "version": "1.0.0",
+  "identifier": "com.shaho.carbon",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "node ../scripts/build-sidecar.mjs && pnpm --dir ../web dev",
+    "beforeBuildCommand": "pnpm --dir ../web build && node ../scripts/build-sidecar.mjs",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Carbon",
+        "width": 1280,
+        "height": 832,
+        "minWidth": 880,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:* ws://localhost:5173; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "chunkburst",
+    "targets": ["app", "dmg", "nsis", "deb", "appimage"],
+    "createUpdaterArtifacts": false,
+    "externalBin": ["binaries/carbon"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["carbon"]
+      }
+    }
+  }
+}

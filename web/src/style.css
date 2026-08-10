@@ -1,0 +1,263 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Shiki dual-theme: apply the light vars by default, swap to the dark vars under .dark.
+   With defaultColor:false Shiki sets no color itself, so BOTH halves must be applied. */
+.shiki {
+  background-color: var(--shiki-light-bg);
+}
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style);
+  font-weight: var(--shiki-light-font-weight);
+  text-decoration: var(--shiki-light-text-decoration);
+}
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+.dark .shiki {
+  background-color: var(--shiki-dark-bg) !important;
+}
+
+/* Prose tuning — Linear-like hierarchy + inline-code chips, on design tokens.
+   Applies to rendered bodies/notes (.prose via Markdown) and the TipTap composer (.tiptap). */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-links: var(--brand);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+/* Drop @tailwindcss/typography's literal backticks around inline code. */
+.prose :where(code):not(:where(pre code))::before,
+.prose :where(code):not(:where(pre code))::after {
+  content: "" !important;
+}
+/* Inline code as a subtle chip (not block/pre code, which Shiki owns). */
+.prose :where(code):not(:where(pre code)) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  font-weight: 400;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  padding: 0.05em 0.34em;
+  white-space: nowrap;
+}
+/* Heading hierarchy — clear, tight, scannable. Bodies use ## / ###. */
+.prose :where(h1, h2, h3, h4) {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  margin-bottom: 0.5em;
+}
+.prose :where(h1) { font-size: 1.35em; margin-top: 1.4em; }
+.prose :where(h2) { font-size: 1.12em; margin-top: 1.5em; }
+.prose :where(h3) { font-size: 1em; margin-top: 1.2em; }
+.prose :where(h1, h2, h3):first-child { margin-top: 0; }
+/* Tighter list + paragraph rhythm. */
+.prose :where(p, ul, ol) { margin-top: 0.6em; margin-bottom: 0.6em; }
+.prose :where(li) { margin-top: 0.2em; margin-bottom: 0.2em; }
+.prose :where(ul) { padding-left: 1.25em; }
+.prose :where(blockquote) {
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+/* Inline-variant code (notes rendered outside .prose) gets the same chip. */
+.carbon-md-inline code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  padding: 0.05em 0.34em;
+}
+
+/* TipTap placeholder (empty editor) */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Inter Variable', sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-brand: var(--brand);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-success: var(--success);
+    --color-info: var(--info);
+    --color-warning: var(--warning);
+    --color-app: var(--app);
+    --color-panel: var(--panel);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    /* Light mode is deliberately white. Brand colour belongs to controls and
+       selection states, never the workspace canvas. */
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.205 0.025 258);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.205 0.025 258);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.205 0.025 258);
+    --primary: oklch(0.33 0.07 267);
+    --primary-foreground: oklch(0.99 0.004 250);
+    --secondary: oklch(0.965 0 0);
+    --secondary-foreground: oklch(0.24 0.035 258);
+    --muted: oklch(0.965 0 0);
+    --muted-foreground: oklch(0.5 0.025 255);
+    --accent: oklch(0.944 0.018 266);
+    --accent-foreground: oklch(0.24 0.05 267);
+    --destructive: oklch(0.575 0.19 25);
+    /* Linear-style indigo accent — used sparingly for focus/selection/links. */
+    --brand: oklch(0.55 0.17 277);
+    --brand-foreground: oklch(0.99 0.004 250);
+    --success: oklch(0.52 0.12 184);
+    --info: oklch(0.54 0.13 240);
+    --warning: oklch(0.56 0.15 77);
+    /* Keep the whole primary workspace white; depth comes from neutral borders. */
+    --app: oklch(1 0 0);
+    --panel: oklch(1 0 0);
+    --border: oklch(0.9 0 0);
+    --input: oklch(0.87 0 0);
+    --ring: oklch(0.62 0.15 277);
+    --chart-1: oklch(0.55 0.17 277);
+    --chart-2: oklch(0.52 0.12 184);
+    --chart-3: oklch(0.56 0.15 77);
+    --chart-4: oklch(0.575 0.19 25);
+    --chart-5: oklch(0.54 0.13 240);
+    --radius: 0.625rem;
+    --sidebar: oklch(1 0 0);
+    --sidebar-foreground: oklch(0.205 0.025 258);
+    --sidebar-primary: oklch(0.55 0.17 277);
+    --sidebar-primary-foreground: oklch(0.99 0.004 250);
+    --sidebar-accent: oklch(0.948 0.018 266);
+    --sidebar-accent-foreground: oklch(0.24 0.05 267);
+    --sidebar-border: oklch(0.9 0 0);
+    --sidebar-ring: oklch(0.62 0.15 277);
+}
+
+/* Midnight carbon: blue-grey elevation steps keep the workspace readable. */
+.dark {
+    --background: oklch(0.215 0.019 258);
+    --foreground: oklch(0.945 0.014 250);
+    --card: oklch(0.265 0.022 257);
+    --card-foreground: oklch(0.945 0.014 250);
+    --popover: oklch(0.29 0.024 257);
+    --popover-foreground: oklch(0.945 0.014 250);
+    --primary: oklch(0.78 0.13 274);
+    --primary-foreground: oklch(0.19 0.025 258);
+    --secondary: oklch(0.302 0.02 257);
+    --secondary-foreground: oklch(0.945 0.014 250);
+    --muted: oklch(0.29 0.018 257);
+    --muted-foreground: oklch(0.725 0.025 252);
+    --accent: oklch(0.315 0.032 265);
+    --accent-foreground: oklch(0.955 0.014 250);
+    --destructive: oklch(0.73 0.15 28);
+    --brand: oklch(0.73 0.15 278);
+    --brand-foreground: oklch(0.19 0.025 258);
+    --success: oklch(0.75 0.12 184);
+    --info: oklch(0.76 0.115 240);
+    --warning: oklch(0.84 0.14 80);
+    --app: oklch(0.195 0.025 257);
+    --panel: oklch(0.25 0.021 257);
+    --border: oklch(0.42 0.025 257 / 72%);
+    --input: oklch(0.37 0.024 257);
+    --ring: oklch(0.72 0.14 276);
+    --chart-1: oklch(0.73 0.15 278);
+    --chart-2: oklch(0.75 0.12 184);
+    --chart-3: oklch(0.84 0.14 80);
+    --chart-4: oklch(0.73 0.15 28);
+    --chart-5: oklch(0.76 0.115 240);
+    --sidebar: oklch(0.228 0.027 258);
+    --sidebar-foreground: oklch(0.945 0.014 250);
+    --sidebar-primary: oklch(0.73 0.15 278);
+    --sidebar-primary-foreground: oklch(0.19 0.025 258);
+    --sidebar-accent: oklch(0.285 0.032 260);
+    --sidebar-accent-foreground: oklch(0.955 0.014 250);
+    --sidebar-border: oklch(0.39 0.026 258 / 76%);
+    --sidebar-ring: oklch(0.72 0.14 276);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    font-size: 0.9375rem;
+    }
+  html {
+    @apply font-sans;
+    }
+}
+
+/* Deterministic label colors. Components only select a stable tone class; the
+   palette itself stays token-driven and changes correctly with the theme. */
+.carbon-label-tone-0 { --carbon-label: var(--brand); }
+.carbon-label-tone-1 { --carbon-label: var(--success); }
+.carbon-label-tone-2 { --carbon-label: var(--info); }
+.carbon-label-tone-3 { --carbon-label: var(--warning); }
+.carbon-label-tone-4 { --carbon-label: var(--destructive); }
+.carbon-label-tone-5 { --carbon-label: var(--muted-foreground); }
+.carbon-label {
+  border-color: color-mix(in oklab, var(--carbon-label) 30%, var(--border));
+  background-color: color-mix(in oklab, var(--carbon-label) 10%, var(--muted));
+  color: var(--carbon-label);
+}

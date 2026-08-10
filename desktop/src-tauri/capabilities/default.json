@@ -1,0 +1,41 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main-window permissions for the local Carbon server origin.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://localhost:5173", "http://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close",
+    "dialog:allow-open",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    "notification:allow-register-listener",
+    "allow-is-portable",
+    "allow-get-autostart-mode",
+    "allow-set-autostart-mode",
+    "allow-set-ui-language",
+    "allow-update-tray",
+    "allow-is-notification-owner",
+    "allow-choose-notification-sound",
+    "allow-get-notification-sound",
+    "allow-clear-notification-sound",
+    "allow-play-notification-sound",
+    "allow-get-data-home",
+    "allow-set-data-home",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/carbon",
+          "sidecar": true,
+          "args": ["web", "--addr", "127.0.0.1:2525", "--parent-watch"]
+        }
+      ]
+    }
+  ]
+}

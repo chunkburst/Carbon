@@ -1,0 +1,20 @@
+/* Carbon brand accent — indigo #4c5edf */
+:root {
+  --vp-c-brand-1: #4453c6;
+  --vp-c-brand-2: #4c5edf;
+  --vp-c-brand-3: #4c5edf;
+  --vp-c-brand-soft: rgba(76, 94, 223, 0.14);
+
+  /* Home hero: indigo wordmark + a soft indigo glow behind the logo */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #4c5edf 30%, #6677ff);
+  --vp-home-hero-image-background-image: linear-gradient(-45deg, #4c5edf55, #6677ff33);
+  --vp-home-hero-image-filter: blur(48px);
+}
+
+.dark {
+  --vp-c-brand-1: #8f9bff;
+  --vp-c-brand-2: #6677ff;
+  --vp-c-brand-3: #4c5edf;
+  --vp-c-brand-soft: rgba(102, 119, 255, 0.16);
+}

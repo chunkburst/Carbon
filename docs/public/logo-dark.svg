@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>Carbon</title>
+  <defs>
+    <linearGradient id="carbon-gradient" x1="10" y1="9" x2="55" y2="55" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5B5CE2"/>
+      <stop offset="1" stop-color="#20B7A6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#101827"/>
+  <path d="M32 6.5 53.2 18.75v24.5L32 55.5 10.8 43.25v-24.5L32 6.5Z" stroke="url(#carbon-gradient)" stroke-width="3.2" stroke-linejoin="round"/>
+  <circle cx="32" cy="6.5" r="2.15" fill="#8B8CFF"/>
+  <circle cx="53.2" cy="18.75" r="2.15" fill="#57D5C6"/>
+  <circle cx="53.2" cy="43.25" r="2.15" fill="#57D5C6"/>
+  <circle cx="32" cy="55.5" r="2.15" fill="#2CC6B6"/>
+  <circle cx="10.8" cy="43.25" r="2.15" fill="#7C7DF2"/>
+  <circle cx="10.8" cy="18.75" r="2.15" fill="#7C7DF2"/>
+  <path d="M41.25 22.2A14.2 14.2 0 1 0 41.25 41.8" stroke="#F5F7FF" stroke-width="5" stroke-linecap="round"/>
+  <path d="M42.3 22.8 46.1 19" stroke="#20B7A6" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M42.3 41.2 46.1 45" stroke="#5B5CE2" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

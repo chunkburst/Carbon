@@ -1,0 +1,14 @@
+root = "."
+tmp_dir = "bin/.air"
+
+[build]
+  cmd = "go build -o ./bin/carbon ./cmd/carbon"
+  bin = "./bin/carbon"
+  args_bin = ["serve", "--actor", "agent:dev", "--repo", "."]
+  include_ext = ["go"]
+  exclude_dir = ["bin", ".carbon"]
+  kill_delay = "500ms"
+  stop_on_error = true
+
+[misc]
+  clean_on_exit = true
