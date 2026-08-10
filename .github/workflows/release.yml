@@ -285,7 +285,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             build-essential curl file libayatana-appindicator3-dev libfuse2 \
-            librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
+            librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget xdg-utils
       - name: Verify committed release version and source tree
         run: node scripts/verify-release-version.mjs "${{ github.ref_name }}"
       - name: Install web dependencies

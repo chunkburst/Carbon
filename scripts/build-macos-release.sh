@@ -75,7 +75,7 @@ for binary in "$main_binary" "$sidecar" "$repo_root/desktop/src-tauri/binaries/c
     echo "Expected executable is missing from the macOS bundle: $binary" >&2
     exit 1
   fi
-  if ! lipo -verify_arch "$expected_lipo_arch" "$binary"; then
+  if ! lipo "$binary" -verify_arch "$expected_lipo_arch"; then
     echo "Unexpected architecture for $binary" >&2
     lipo -archs "$binary" >&2 || true
     exit 1
