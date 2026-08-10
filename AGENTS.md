@@ -30,7 +30,8 @@ scope, plus explicit Home-authorized project-session routing.
   `desktop/src-tauri/target/release/bundle/`.
 - **Windows portable:** `pnpm.cmd --dir desktop portable:windows` creates a no-install ZIP under
   `desktop/src-tauri/target/portable/` with the native executable and `carbon` sidecar together.
-- **Release:** a `v*` tag publishes `Carbon-<version>-windows-portable.zip`.
+- **Release:** a stable `vX.Y.Z` tag publishes verified Windows x64, macOS Apple Silicon/Intel,
+  and Linux x64/ARM64 desktop and CLI artifacts with a shared `SHA256SUMS.txt`.
 - The sidecar exits with the app when `carbon web --parent-watch` observes stdin EOF.
 - It prefers `127.0.0.1:2525` and reports the chosen port through `CARBON_WEB_URL`.
 

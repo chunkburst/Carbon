@@ -8,7 +8,9 @@
     "tauri:build": "tauri build",
     "portable:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-windows-portable.ps1",
     "installer:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-windows-release.ps1",
-    "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-windows-release.ps1"
+    "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-windows-release.ps1",
+    "release:macos": "bash ../scripts/build-macos-release.sh",
+    "release:linux": "bash ../scripts/build-linux-release.sh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

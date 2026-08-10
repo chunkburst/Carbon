@@ -15,7 +15,9 @@
 
 <p align="center">
   <img alt="Release v1.0.0" src="https://img.shields.io/badge/release-v1.0.0-6d5dfc" />
-  <img alt="Windows 10/11 x64" src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078D4?logo=windows11&logoColor=white" />
+  <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?logo=windows11&logoColor=white" />
+  <img alt="macOS Apple Silicon and Intel" src="https://img.shields.io/badge/macOS-ARM64%20%7C%20x64-111111?logo=apple&logoColor=white" />
+  <img alt="Linux ARM64 and x64" src="https://img.shields.io/badge/Linux-ARM64%20%7C%20x64-FCC624?logo=linux&logoColor=111111" />
   <img alt="MCP stable v2" src="https://img.shields.io/badge/MCP-stable%20v2-6d5dfc" />
   <img alt="Local first" src="https://img.shields.io/badge/data-local--first-2f855a" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-24292f.svg" /></a>
@@ -37,23 +39,30 @@
 
 ## 📦 下载与安装
 
-当前正式版本：**v1.0.0** · 支持 **Windows 10 / 11 x64**。所有预编译文件统一发布在 [GitHub Releases](https://github.com/chunkburst/Carbon/releases)。
+当前正式版本：**v1.0.0**。桌面版与 CLI 覆盖 **Windows x64、macOS Apple Silicon / Intel、Linux ARM64 / x64**；所有预编译文件统一发布在 [GitHub Releases](https://github.com/chunkburst/Carbon/releases)。
 
-| 推荐 | 发行形式 | 文件 | 适合场景 |
+| 平台 | 推荐发行形式 | 文件 | 说明 |
 | --- | --- | --- | --- |
-| ⭐ | **Windows 安装版** | `Carbon_1.0.0_x64-setup.exe` | 日常使用；安装到当前用户，创建应用入口并注册 `carbon://` 协议。 |
-|  | **Windows MSI** | `Carbon_1.0.0_x64_en-US.msi` | 企业、脚本化或集中部署；支持标准 `msiexec` 参数。 |
-|  | **Windows 便携版** | `Carbon-1.0.0-windows-portable.zip` | 免安装、U 盘或独立目录使用；数据默认跟随解压目录。 |
-|  | **Windows CLI** | `carbon-1.0.0-windows-x64-cli.zip` | 只需要 CLI、Web Server 或 MCP Server，不需要桌面 UI。 |
+| Windows x64 | ⭐ **NSIS 安装版** | `Carbon_1.0.0_x64-setup.exe` | Windows 10/11 日常使用；创建应用入口并注册 `carbon://`。 |
+| Windows x64 | **MSI** | `Carbon_1.0.0_x64_en-US.msi` | 企业、脚本化或集中部署。 |
+| Windows x64 | **便携 ZIP** | `Carbon-1.0.0-windows-portable.zip` | 免安装；数据默认跟随完整解压目录。 |
+| Windows x64 | **CLI ZIP** | `carbon-1.0.0-windows-x64-cli.zip` | 仅 CLI、Web Server 与 MCP Server。 |
+| macOS Apple Silicon | ⭐ **DMG** | `Carbon-1.0.0-macos-arm64.dmg` | M1/M2/M3/M4 等 Apple Silicon Mac。 |
+| macOS Intel | **DMG** | `Carbon-1.0.0-macos-x64.dmg` | Intel Mac；最低支持 macOS 12 Monterey。 |
+| macOS ARM64 / x64 | **CLI tar.gz** | `carbon-1.0.0-macos-{arm64,x64}-cli.tar.gz` | 对应架构的 CLI、Web 与 MCP Server。 |
+| Linux x64 / ARM64 | ⭐ **AppImage** | `Carbon-1.0.0-linux-{x64,arm64}.AppImage` | 通用桌面包；下载后先 `chmod +x`。 |
+| Debian / Ubuntu x64 / ARM64 | **DEB** | `Carbon-1.0.0-linux-{x64,arm64}.deb` | 使用 `apt` / `dpkg` 安装。 |
+| Linux x64 / ARM64 | **CLI tar.gz** | `carbon-1.0.0-linux-{x64,arm64}-cli.tar.gz` | 对应架构的 CLI、Web 与 MCP Server。 |
 
-> 当前 v1.0.0 构建尚未进行商业代码签名，Windows 可能显示 SmartScreen 提示。请只从本仓库 Releases 下载，并对照随版本发布的 `SHA256SUMS.txt`。
+> 当前 v1.0.0 构建尚未进行商业代码签名。Windows 可能显示 SmartScreen 提示；macOS DMG **未签名、未公证**，Gatekeeper 可能要求在“隐私与安全性”中明确允许首次打开。请只从本仓库 Releases 下载，并对照全平台共用的 `SHA256SUMS.txt`。
 
 ### 应该下载哪一个？
 
 - **大多数用户：** 选择安装版 `-setup.exe`。安装器会在缺少时引导安装 Microsoft Edge WebView2 Runtime。
 - **组织部署：** 选择 `.msi`，例如 `msiexec /i Carbon_1.0.0_x64_en-US.msi`。
 - **不想安装：** 下载 portable ZIP，完整解压后运行 **Carbon Portable.exe**；必须让它与 `carbon.exe`、`WebView2Loader.dll` 保持在同一目录。
-- **macOS / Linux：** 当前没有预编译桌面包，可先使用下方的 CLI/Web 源码构建；桌面包需要对应平台的 Tauri 工具链。
+- **macOS：** Apple Silicon 选择 `arm64`，Intel 选择 `x64`；挂载 DMG 后把 Carbon 拖入 Applications。未签名版本首次运行需显式允许。
+- **Linux：** 优先选择 AppImage；Debian/Ubuntu 可选择 DEB。桌面运行需要系统提供 WebKitGTK 4.1；无桌面环境时使用 CLI tar.gz。
 
 ### 第一次运行
 
@@ -157,6 +166,13 @@ go build -o bin\carbon.exe .\cmd\carbon
 ```powershell
 pnpm.cmd --dir desktop portable:windows   # Windows 便携 ZIP
 pnpm.cmd --dir desktop release:windows    # 便携版 + CLI + NSIS + MSI + SHA256SUMS
+```
+
+macOS 与 Linux 必须在对应架构的原生系统上构建：
+
+```sh
+pnpm --dir desktop release:macos  # 当前 Mac 架构：unsigned DMG + CLI
+pnpm --dir desktop release:linux  # 当前 Linux 架构：AppImage + DEB + CLI
 ```
 
 `carbon web` 只监听本机回环地址，并输出实际的 `CARBON_WEB_URL`；不要假设端口一定是 2525。

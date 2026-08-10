@@ -13,6 +13,18 @@ the same value into the `carbon` CLI and MCP/API identity.
 
 ### Added
 
+- **Multi-platform release artifacts.** Carbon v1.0.0 publishes Windows x64 NSIS
+  (`Carbon_1.0.0_x64-setup.exe`), MSI (`Carbon_1.0.0_x64_en-US.msi`), portable
+  (`Carbon-1.0.0-windows-portable.zip`), and CLI (`carbon-1.0.0-windows-x64-cli.zip`) files;
+  unsigned and unnotarized macOS Apple Silicon and Intel DMGs
+  (`Carbon-1.0.0-macos-arm64.dmg`, `Carbon-1.0.0-macos-x64.dmg`) with matching CLI tarballs
+  (`carbon-1.0.0-macos-arm64-cli.tar.gz`, `carbon-1.0.0-macos-x64-cli.tar.gz`); and Linux x64
+  and ARM64 AppImage, Debian, and CLI tarball files
+  (`Carbon-1.0.0-linux-x64.AppImage`, `Carbon-1.0.0-linux-x64.deb`,
+  `carbon-1.0.0-linux-x64-cli.tar.gz`, `Carbon-1.0.0-linux-arm64.AppImage`,
+  `Carbon-1.0.0-linux-arm64.deb`, `carbon-1.0.0-linux-arm64-cli.tar.gz`). Every file is
+  covered by the single `SHA256SUMS.txt` manifest. Windows desktop packages require the
+  Windows-only WebView2 Runtime; Linux desktop packages require WebKitGTK at runtime.
 - **Worker operations and analytics.** Worker records can be reset or tombstoned without
   changing task files, leases, assignments, provenance, sessions, or Work Logs. Later durable
   activity recreates a deleted Worker from its reset boundary. Scoped reports now include

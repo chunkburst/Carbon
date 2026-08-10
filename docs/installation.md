@@ -4,9 +4,42 @@ title: Installation
 
 # Installation
 
-Carbon v1.0.0 ships four Windows x64 artifacts: a recommended NSIS installer, an MSI installer,
-a portable desktop ZIP, and a CLI-only ZIP. They use the same `carbon` binary, `.carbon/` Home,
-MCP surface, and `carbon://` deep links where deep links are installed.
+Carbon v1.0.0 ships desktop and CLI artifacts for Windows x64, macOS (Apple Silicon and Intel),
+and Linux (x64 and ARM64). They use the same `carbon` binary, `.carbon/` Home, MCP surface, and
+`carbon://` deep links where deep links are installed.
+
+## Release matrix
+
+Download the artifact that matches both your operating system and CPU architecture. Desktop
+artifacts include the Carbon UI; CLI artifacts include the CLI, local Web server, and MCP server
+without the desktop UI.
+
+| Platform | Desktop artifacts | CLI artifact |
+| --- | --- | --- |
+| Windows x64 | NSIS: `Carbon_1.0.0_x64-setup.exe`<br>MSI: `Carbon_1.0.0_x64_en-US.msi`<br>Portable: `Carbon-1.0.0-windows-portable.zip` | `carbon-1.0.0-windows-x64-cli.zip` |
+| macOS Apple Silicon (arm64) | `Carbon-1.0.0-macos-arm64.dmg` | `carbon-1.0.0-macos-arm64-cli.tar.gz` |
+| macOS Intel (x64) | `Carbon-1.0.0-macos-x64.dmg` | `carbon-1.0.0-macos-x64-cli.tar.gz` |
+| Linux x64 | AppImage: `Carbon-1.0.0-linux-x64.AppImage`<br>Debian package: `Carbon-1.0.0-linux-x64.deb` | `carbon-1.0.0-linux-x64-cli.tar.gz` |
+| Linux ARM64 | AppImage: `Carbon-1.0.0-linux-arm64.AppImage`<br>Debian package: `Carbon-1.0.0-linux-arm64.deb` | `carbon-1.0.0-linux-arm64-cli.tar.gz` |
+
+All artifacts are published with one `SHA256SUMS.txt` manifest in the
+[Carbon releases](https://github.com/chunkburst/Carbon/releases). The manifest covers every
+Windows, macOS, and Linux desktop and CLI file in that release; there are no platform-specific
+checksum files. From the directory containing the downloads, verify the complete set on Linux
+with:
+
+```sh
+sha256sum --check SHA256SUMS.txt
+```
+
+macOS ships the compatible `shasum` command instead:
+
+```sh
+shasum -a 256 --check SHA256SUMS.txt
+```
+
+On Windows, compare an individual download with its manifest entry by running
+`Get-FileHash -Algorithm SHA256 <file>` in PowerShell.
 
 ## Windows downloads
 
@@ -17,12 +50,13 @@ MCP surface, and `carbon://` deep links where deep links are installed.
 | Portable desktop | `Carbon-1.0.0-windows-portable.zip` | No installation; Home defaults to the extracted directory. |
 | CLI only | `carbon-1.0.0-windows-x64-cli.zip` | CLI, local Web server, and MCP server without the desktop UI. |
 
-Download them with `SHA256SUMS.txt` from the
-[Carbon releases](https://github.com/chunkburst/Carbon/releases). v1.0.0 artifacts are currently
-unsigned, so Windows may display a SmartScreen prompt.
+The v1.0.0 Windows installers and portable executable are unsigned, so Windows may display a
+SmartScreen prompt. The single checksum manifest described above covers these files as well.
 
-The NSIS and MSI installers check for Microsoft Edge WebView2 Runtime and download its bootstrapper
-when needed. The default installation is scoped to the current user.
+Microsoft Edge WebView2 Runtime is a Windows-only dependency. The NSIS and MSI installers check
+for it and download its bootstrapper when needed; the portable desktop app also requires the
+runtime. The macOS and Linux packages do not use WebView2. The default Windows installation is
+scoped to the current user.
 
 ## Windows portable
 
@@ -33,6 +67,28 @@ global binary or register a deep link.
 
 The desktop app lets you choose a Home, register standalone projects, optionally create shared
 clusters, select custom catalog images, and generate agent configuration.
+
+## macOS downloads
+
+Choose the DMG for Apple Silicon (`arm64`) or Intel (`x64`) on macOS 12 Monterey or newer. The
+v1.0.0 DMGs are intentionally unsigned and unnotarized. macOS may show a Gatekeeper warning on
+first launch; use the normal
+Finder **Open** confirmation only after verifying that the file came from the Carbon release and
+matches `SHA256SUMS.txt`.
+
+The matching CLI tarballs are `carbon-1.0.0-macos-arm64-cli.tar.gz` and
+`carbon-1.0.0-macos-x64-cli.tar.gz`. Extract one, then place the `carbon` executable on your
+`PATH` if you want to invoke it from any shell.
+
+## Linux downloads
+
+AppImage and Debian (`.deb`) desktop packages are available for x64 and ARM64. Linux desktop
+packages require the distribution-provided WebKitGTK runtime (and its GTK system dependencies) at
+runtime; install WebKitGTK using your distribution's package manager before starting Carbon.
+
+The matching CLI tarballs are `carbon-1.0.0-linux-x64-cli.tar.gz` and
+`carbon-1.0.0-linux-arm64-cli.tar.gz`. Extract one, mark `carbon` executable if needed, and place
+it on your `PATH`.
 
 ## Build the CLI from source
 
