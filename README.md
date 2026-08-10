@@ -2,14 +2,14 @@
   <img src="docs/public/logo.svg" alt="Carbon" width="88" />
 </p>
 
-<h1 align="center">Carbon</h1>
+<h1 align="center">Carbon (碳原子)</h1>
 
 <p align="center">
-  <strong>本地优先的项目任务中枢，让人与 Coding Agent 共享同一份可审计状态。</strong>
+  <strong>多平台协作下的共享项目任务管理 | 可审计的人与 Coding / Agent 共创</strong>
 </p>
 
 <p align="center">
-  任务、依赖、会话、检查与执行证据统一管理；源码目录和 Carbon 数据严格分开。
+  集成化任务、依赖、会话、检查；在不涉及源码本身(Carbon数据仅涉及自身)下进行任务派发/认领与审计。
 </p>
 
 <p align="center">
