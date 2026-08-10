@@ -2,7 +2,7 @@
   <img src="docs/public/logo.svg" alt="Carbon" width="88" />
 </p>
 
-<h1 align="center">Carbon (碳原子)</h1>
+<h1 align="center">Carbon - 碳原子</h1>
 
 <p align="center">
   <strong>多平台协作下的共享项目任务管理 | 可审计的人与 Coding / Agent 共创</strong>
