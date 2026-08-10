@@ -1,0 +1,1 @@
+# Keeps web/dist present for //go:embed all:dist in clean source checkouts.

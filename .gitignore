@@ -36,6 +36,9 @@ bin/
 dist/
 target/
 web/dist/
+!web/dist/
+web/dist/*
+!web/dist/.gitkeep
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 desktop/src-tauri/target/
