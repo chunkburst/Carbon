@@ -150,9 +150,11 @@ func Save(path string, c Config) error {
 const configWriteFileMode = 0o600
 
 // atomicWrite uses the same durable publication sequence as Store-owned records:
-// private same-directory temp file, explicit permissions, write, Sync, Close, and one
-// replace operation. There is deliberately no remove-then-rename fallback: a failed
-// Windows replacement leaves the previous config.yaml visible and intact.
+// private same-directory temp file, explicit permissions, write, Sync, and one replace
+// operation. Windows closes the temp before MoveFileEx; POSIX keeps it open through
+// identity validation and rename so a deleted temp name cannot reuse its inode. There is
+// deliberately no remove-then-rename fallback: a failed Windows replacement leaves the
+// previous config.yaml visible and intact.
 func atomicWrite(path string, data []byte) error {
 	return atomicWriteWithDurability(path, data, atomicReplace, syncAtomicParent, validateConfigWritePath)
 }
@@ -194,12 +196,19 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 		return fmt.Errorf("config: inspect newly created atomic temp: %w", err)
 	}
 	defer func() {
-		if !closed {
-			_ = tmp.Close()
-		}
 		if !published {
 			// Cleanup is identity-checked so a failed write never deletes an entry
 			// substituted at the randomized temp pathname.
+			// POSIX retains the descriptor through validation, so removing before Close
+			// also prevents an unlinked staging inode from being immediately reused.
+			if !atomicTempRequiresCloseBeforeReplace() {
+				_ = removeAtomicTempFile(tmpPath, tempIdentity)
+			}
+		}
+		if !closed {
+			_ = tmp.Close()
+		}
+		if !published && atomicTempRequiresCloseBeforeReplace() {
 			_ = removeAtomicTempFile(tmpPath, tempIdentity)
 		}
 	}()
@@ -215,10 +224,12 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 	if err := tmp.Sync(); err != nil {
 		return fmt.Errorf("config: sync atomic temp: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("config: close atomic temp: %w", err)
+	if atomicTempRequiresCloseBeforeReplace() {
+		if err := tmp.Close(); err != nil {
+			return fmt.Errorf("config: close atomic temp: %w", err)
+		}
+		closed = true
 	}
-	closed = true
 
 	// Recheck immediately before publication. Rename replaces a final directory entry
 	// rather than following it, and this makes an introduced symlink/reparse point a
@@ -238,6 +249,12 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 		return fmt.Errorf("config: atomically replace %s: %w", path, err)
 	}
 	published = true
+	if !closed {
+		if err := tmp.Close(); err != nil {
+			return fmt.Errorf("%w: close published atomic temp %s: %w", ErrConfigWritePublished, path, err)
+		}
+		closed = true
+	}
 	if err := validateAtomicRegularFile(path, false); err != nil {
 		return fmt.Errorf("%w: verify published entry %s: %w", ErrConfigWritePublished, path, err)
 	}

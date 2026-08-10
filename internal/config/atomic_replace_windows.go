@@ -31,6 +31,11 @@ func atomicReplace(from, to string) error {
 	return windows.MoveFileEx(fromPtr, toPtr, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
 
+// MoveFileEx cannot reliably replace an open staging file on Windows, so the descriptor
+// must be closed before publication. The Windows identity check uses the native file ID
+// after reopening with OPEN_REPARSE_POINT.
+func atomicTempRequiresCloseBeforeReplace() bool { return true }
+
 func atomicWindowsPath(path string) (string, error) {
 	if strings.HasPrefix(path, `\\?\`) || strings.HasPrefix(path, `\??\`) {
 		return path, nil

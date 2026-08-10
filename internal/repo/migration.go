@@ -398,8 +398,14 @@ func snapshotTree(root string) (treeSnapshot, error) {
 		if isRepoReparsePoint(dir, info) || !info.IsDir() {
 			return fmt.Errorf("%w: refusing non-directory or reparse point %s", ErrUnsafeLegacyMigration, dir)
 		}
-		snapshot.Directories++
-		writeDigestRecord(h, "d", rel, fmt.Sprintf("%o", info.Mode().Perm()))
+		// The source root (.cairn) and migration stage are different container
+		// directories: MkdirTemp intentionally creates the latter private (0700).
+		// Their own mode is not migrated state, so hash only relative descendants.
+		// The root is still lstat-validated above before any traversal begins.
+		if rel != "" {
+			snapshot.Directories++
+			writeDigestRecord(h, "d", rel, fmt.Sprintf("%o", info.Mode().Perm()))
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return err

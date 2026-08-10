@@ -571,7 +571,7 @@ func TestConnectCarbonRejectsSymlinkedConfigParent(t *testing.T) {
 	repo := t.TempDir()
 	external := t.TempDir()
 	linkConfigParentOrSkip(t, external, filepath.Join(repo, ".kilocode"))
-	cfg, err := carbonServerConfig("/abs/carbon", "kilo", "agent:test", CarbonScope{Home: "/carbon/home", ClusterID: "cluster-a"})
+	cfg, err := carbonServerConfig("/abs/carbon", "kilo", "agent:test", CarbonScope{Home: "/carbon/home", ClusterID: "cluster-a", ScopeMode: CarbonScopeModeCluster})
 	if err != nil {
 		t.Fatal(err)
 	}
