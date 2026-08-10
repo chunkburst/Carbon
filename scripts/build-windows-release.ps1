@@ -130,6 +130,12 @@ $checksumLines = foreach ($artifact in $releaseArtifacts | Sort-Object { Split-P
 $checksumsPath = Join-Path $releaseAssetsDir "SHA256SUMS.txt"
 Set-Content -LiteralPath $checksumsPath -Encoding ascii -Value $checksumLines
 
+$releaseVerifier = Assert-PlainFile -Path (Join-Path $PSScriptRoot "verify-windows-release.ps1") -Label "Windows release verifier"
+& $releaseVerifier -AssetDirectory $releaseAssetsDir -Version $version
+if ($LASTEXITCODE -ne 0) {
+  throw "Windows release asset verification failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Windows release assets: $releaseAssetsDir"
 foreach ($artifact in @($releaseArtifacts + $checksumsPath)) {
   $item = Get-Item -LiteralPath $artifact
