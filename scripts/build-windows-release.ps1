@@ -11,7 +11,8 @@ $ErrorActionPreference = "Stop"
 function Get-SHA256Hex {
   param([Parameter(Mandatory = $true)][string]$Path)
 
-  $stream = [System.IO.File]::OpenRead($Path)
+  $resolvedPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
+  $stream = [System.IO.File]::OpenRead($resolvedPath)
   try {
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     try {
