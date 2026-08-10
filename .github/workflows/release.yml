@@ -375,6 +375,8 @@ jobs:
               exit 1
             fi
           done
+          tr -d '\r' < "$asset_dir/SHA256SUMS.txt" > "$asset_dir/SHA256SUMS.txt.lf"
+          mv "$asset_dir/SHA256SUMS.txt.lf" "$asset_dir/SHA256SUMS.txt"
           mapfile -t windows_checksum_names < <(awk '{print $2}' "$asset_dir/SHA256SUMS.txt" | sed 's/^\*//' | LC_ALL=C sort)
           windows_expected=(
             "Carbon_${version}_x64-setup.exe"
