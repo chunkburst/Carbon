@@ -9,6 +9,13 @@ the same value into the `carbon` CLI and MCP/API identity.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-24
+
+### Changed
+
+- **Carbon 工作区同步。** 汇总当前正式工作区的 Worker、工作日志、身份协作、悬浮看板与工作风体验优化，并以同一版本号发布桌面端、CLI、Web 与文档包。
+- **多平台发布准备。** Release Action 继续覆盖 Windows、macOS（Apple Silicon / Intel）与 Linux（x64 / ARM64）构建，产物统一生成校验和清单。
+
 ## [1.0.0] - 2026-08-10
 
 ### Added
