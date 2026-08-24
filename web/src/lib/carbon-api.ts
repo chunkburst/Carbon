@@ -273,7 +273,42 @@ export type CarbonWorkerAliasesResponse = {
   aliases: Record<string, string>;
 };
 
+// Project-store identities are intentionally separate from the home-global Worker
+// lifecycle registry. A Worker may cover several task types while each task keeps
+// its single scalar `type` field for backwards compatibility.
+export type CarbonWorkerIdentity = {
+  actor: string;
+  role: string;
+  types: string[];
+  claimedAt: string;
+  updatedAt: string;
+  changedBy: string;
+  reason?: string;
+};
+
+export type CarbonWorkerIdentityListResponse = {
+  modeEnabled: boolean;
+  records: CarbonWorkerIdentity[];
+};
+
+export type CarbonWorkerIdentityMutationResponse = {
+  modeEnabled: boolean;
+  record: CarbonWorkerIdentity;
+};
+
+export type CarbonWorkerIdentityUpdate = {
+  role: string;
+  types: string[];
+  reason?: string;
+};
+
 export type CarbonWorkLogVisibility = "worker_private" | "project_public" | "global_public";
+
+export type CarbonWorkLogCoordination = {
+  version: 1;
+  recipients?: string[];
+  thread?: string;
+};
 
 // Work Logs are audit records, not task provenance. Their visibility is enforced by
 // the sidecar; the local human UI receives the complete record so it can audit every
@@ -288,6 +323,9 @@ export type CarbonWorkLog = {
   title: string;
   body?: string;
   tags?: string[];
+  // Server-owned. Generic Work Log create/update requests cannot attach or mutate
+  // this envelope; only the append-only identity draft primitive can create it.
+  coordination?: CarbonWorkLogCoordination;
   createdAt: string;
   createdBy: string;
   updatedAt: string;
@@ -495,6 +533,12 @@ export type CarbonConfig = {
   scope?: { home?: string; clusterId?: string; projectId?: string };
   checkShell?: string;
   trashRetentionDays: number;
+  identityMode: boolean;
+};
+
+export type CarbonConfigUpdate = {
+  trashRetentionDays?: number;
+  identityMode?: boolean;
 };
 
 export type CarbonBackupSnapshot = {
@@ -847,8 +891,11 @@ export async function getCarbonCapabilities(scope: CarbonScopeInput): Promise<Ca
 export const createCarbonTask = (scope: CarbonScopeInput, input: CarbonTaskFields & { title: string; body?: string; deps?: string[]; labels?: string[]; priority?: string; parent?: string }) =>
   optional<Task>("POST", scopedURL("/api/tasks", scope), input).then(normalizeOptionalTask);
 
-export const listCarbonTasks = (scope: CarbonScopeInput, includeCluster = false) =>
-  optional<{ tasks?: Task[] }>("GET", scopedURL("/api/tasks", scope, { include_cluster: includeCluster ? "true" : undefined })).then((result) =>
+export const listCarbonTasks = (scope: CarbonScopeInput, includeCluster = false, marketHistory = false) =>
+  optional<{ tasks?: Task[] }>("GET", scopedURL("/api/tasks", scope, {
+    include_cluster: includeCluster ? "true" : undefined,
+    market_history: marketHistory ? "true" : undefined,
+  })).then((result) =>
     result.available ? { available: true as const, data: { ...result.data, tasks: (result.data.tasks ?? []).map(normalizeTask) } } : result,
   );
 
@@ -1169,8 +1216,17 @@ export const getBackupStatus = (scope: CarbonHomeScope) =>
 export const getCarbonConfig = (scope: CarbonScopeInput) =>
   optional<CarbonConfig>("GET", scopedURL("/api/config", scope));
 
-export const saveCarbonConfig = (scope: CarbonScopeInput, input: { trashRetentionDays: number }) =>
+export const saveCarbonConfig = (scope: CarbonScopeInput, input: CarbonConfigUpdate) =>
   optional<CarbonConfig>("POST", scopedURL("/api/config", scope), input);
+
+export const listCarbonWorkerIdentities = (scope: CarbonScopeInput) =>
+  optional<CarbonWorkerIdentityListResponse>("GET", scopedURL("/api/worker-identities", scope));
+
+export const updateCarbonWorkerIdentity = (
+  scope: CarbonScopeInput,
+  actor: string,
+  input: CarbonWorkerIdentityUpdate,
+) => optional<CarbonWorkerIdentityMutationResponse>("PUT", scopedURL(`/api/worker-identities/${enc(actor)}`, scope), input);
 
 // --- Carbon-scoped MCP connection -------------------------------------------------
 

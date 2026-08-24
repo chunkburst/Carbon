@@ -1,0 +1,1153 @@
+.carbon-animation-board-compact {
+  padding: 0.5rem;
+}
+
+.carbon-animation-board-compact .carbon-animation-summary {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.carbon-animation-board-compact .carbon-animation-summary::-webkit-scrollbar {
+  display: none;
+}
+
+.carbon-animation-board[data-style="market-kline"] > header,
+.carbon-animation-board[data-style="market-kline"] > .carbon-animation-summary {
+  display: none;
+}
+
+.carbon-animation-board[data-reduced-motion="true"] .carbon-pixel-agent,
+.carbon-animation-board[data-reduced-motion="true"] .carbon-pixel-terminal > span,
+.carbon-animation-board[data-reduced-motion="true"] .carbon-pixel-barrier,
+.carbon-animation-board[data-reduced-motion="true"] .carbon-pixel-delivery-gate {
+  animation: none;
+}
+
+.carbon-pixel-scene,
+.carbon-market-scene {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 2);
+  background: var(--card);
+  box-shadow: 0 0.75rem 1.75rem color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+.carbon-pixel-scene {
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--brand) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in oklab, var(--brand) 6%, transparent) 1px, transparent 1px),
+    var(--card);
+  background-size: 1rem 1rem;
+}
+
+.carbon-pixel-scene-header,
+.carbon-market-toolbar,
+.carbon-market-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.7rem 0.85rem;
+}
+
+.carbon-pixel-scene-header {
+  background: color-mix(in oklab, var(--card) 90%, var(--brand));
+}
+
+.carbon-scene-kicker,
+.carbon-pixel-task-id,
+.carbon-market-symbol > span {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.carbon-scene-kicker {
+  color: var(--brand);
+}
+
+.carbon-scene-title {
+  margin: 0.12rem 0 0;
+  color: var(--foreground);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.carbon-pixel-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
+  background: color-mix(in oklab, var(--card) 94%, var(--foreground));
+}
+
+.carbon-state-pixel,
+.carbon-market-marker-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  background: var(--muted-foreground);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+
+.carbon-state-pixel[data-state="active"],
+.carbon-market-marker-dot[data-state="active"] {
+  background: var(--brand);
+}
+
+.carbon-state-pixel[data-state="completed"],
+.carbon-market-marker-dot[data-state="completed"] {
+  background: var(--success);
+}
+
+.carbon-state-pixel[data-state="blocked"],
+.carbon-market-marker-dot[data-state="blocked"] {
+  background: var(--destructive);
+}
+
+.carbon-state-pixel[data-state="queued"],
+.carbon-market-marker-dot[data-state="queued"] {
+  background: var(--warning);
+}
+
+.carbon-pixel-floor-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 0.8rem;
+}
+
+.carbon-pixel-floor {
+  position: relative;
+  display: grid;
+  min-width: max(52rem, calc(var(--carbon-pixel-columns) * 8.6rem));
+  min-height: calc(var(--carbon-pixel-rows) * 9.75rem);
+  grid-template-columns: repeat(var(--carbon-pixel-columns), minmax(8rem, 1fr));
+  grid-auto-rows: 9.25rem;
+  gap: 0.45rem;
+  padding: 1.5rem 0.45rem 0.45rem;
+  border: 1px solid color-mix(in oklab, var(--border) 85%, var(--brand));
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--foreground) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in oklab, var(--foreground) 5%, transparent) 1px, transparent 1px),
+    color-mix(in oklab, var(--muted) 58%, var(--card));
+  background-size: 0.5rem 0.5rem;
+}
+
+.carbon-pixel-floor-route {
+  position: absolute;
+  top: 0.38rem;
+  right: 0.6rem;
+  left: 0.6rem;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+  color: var(--muted-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.carbon-pixel-floor-route > span:nth-child(2) { color: var(--brand); }
+.carbon-pixel-floor-route > span:nth-child(3) { color: var(--destructive); }
+.carbon-pixel-floor-route > span:nth-child(4) { color: var(--success); }
+
+.carbon-pixel-station {
+  --pixel-state: var(--warning);
+  position: relative;
+  display: flex;
+  min-width: 0;
+  cursor: pointer;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.34rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--pixel-state) 42%, var(--border));
+  border-radius: 0.18rem;
+  padding: 0.42rem;
+  color: var(--foreground);
+  text-align: left;
+  background: color-mix(in oklab, var(--card) 88%, var(--pixel-state));
+  box-shadow: 0.2rem 0.2rem 0 color-mix(in oklab, var(--foreground) 10%, transparent);
+  outline: none;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.carbon-pixel-station:hover,
+.carbon-pixel-station:focus-visible {
+  transform: translate(-0.12rem, -0.12rem);
+  border-color: var(--ring);
+  box-shadow: 0.35rem 0.35rem 0 color-mix(in oklab, var(--brand) 24%, transparent);
+}
+
+.carbon-pixel-station:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.carbon-pixel-station[data-state="active"] { --pixel-state: var(--brand); }
+.carbon-pixel-station[data-state="completed"] { --pixel-state: var(--success); }
+.carbon-pixel-station[data-state="blocked"] { --pixel-state: var(--destructive); }
+
+.carbon-pixel-workbench {
+  position: relative;
+  display: block;
+  height: 3.55rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--pixel-state) 32%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--foreground) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in oklab, var(--foreground) 7%, transparent) 1px, transparent 1px),
+    color-mix(in oklab, var(--muted) 48%, var(--card));
+  background-size: 0.35rem 0.35rem;
+}
+
+.carbon-pixel-terminal {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.68rem;
+  width: 1.6rem;
+  height: 1.15rem;
+  border: 0.2rem solid var(--foreground);
+  background: var(--pixel-state);
+  box-shadow: 0.25rem 0.25rem 0 color-mix(in oklab, var(--foreground) 28%, transparent);
+}
+
+.carbon-pixel-terminal::after {
+  position: absolute;
+  right: -0.35rem;
+  bottom: -0.52rem;
+  left: 0.1rem;
+  height: 0.18rem;
+  content: "";
+  background: var(--foreground);
+}
+
+.carbon-pixel-terminal > span {
+  position: absolute;
+  top: 0.16rem;
+  left: 0.18rem;
+  width: 0.72rem;
+  height: 0.16rem;
+  background: var(--card);
+  animation: carbon-pixel-screen 1s steps(2, end) infinite;
+}
+
+.carbon-pixel-crate,
+.carbon-pixel-barrier,
+.carbon-pixel-delivery-gate {
+  position: absolute;
+  display: none;
+}
+
+.carbon-pixel-crate {
+  right: 0.72rem;
+  bottom: 0.52rem;
+  width: 1rem;
+  height: 1rem;
+  border: 0.18rem solid var(--warning);
+  background: color-mix(in oklab, var(--warning) 40%, var(--card));
+}
+
+.carbon-pixel-barrier {
+  right: 0.55rem;
+  bottom: 0.7rem;
+  width: 1.8rem;
+  height: 0.42rem;
+  border-top: 0.18rem solid var(--destructive);
+  border-bottom: 0.18rem solid var(--destructive);
+  background: repeating-linear-gradient(135deg, var(--warning) 0 0.22rem, var(--destructive) 0.22rem 0.44rem);
+  animation: carbon-pixel-alert 800ms steps(2, end) infinite;
+}
+
+.carbon-pixel-delivery-gate {
+  right: 0.6rem;
+  bottom: 0.48rem;
+  width: 1.2rem;
+  height: 1.55rem;
+  border: 0.18rem solid var(--success);
+  background: color-mix(in oklab, var(--success) 34%, var(--card));
+  box-shadow: 0 0 0.4rem color-mix(in oklab, var(--success) 35%, transparent);
+}
+
+.carbon-pixel-station[data-state="queued"] .carbon-pixel-crate,
+.carbon-pixel-station[data-state="blocked"] .carbon-pixel-barrier,
+.carbon-pixel-station[data-state="completed"] .carbon-pixel-delivery-gate {
+  display: block;
+}
+
+.carbon-pixel-agent {
+  position: absolute;
+  right: 2.55rem;
+  bottom: 0.35rem;
+  display: block;
+  width: 1.25rem;
+  height: 1.95rem;
+  color: var(--pixel-state);
+  animation: carbon-pixel-agent-idle 1.1s steps(2, end) infinite;
+}
+
+.carbon-pixel-agent-head,
+.carbon-pixel-agent-body,
+.carbon-pixel-agent-arm,
+.carbon-pixel-agent-leg {
+  position: absolute;
+  display: block;
+  background: currentColor;
+}
+
+.carbon-pixel-agent-head { top: 0; left: 0.42rem; width: 0.47rem; height: 0.47rem; }
+.carbon-pixel-agent-body { top: 0.52rem; left: 0.27rem; width: 0.76rem; height: 0.72rem; }
+.carbon-pixel-agent-arm { top: 0.62rem; width: 0.25rem; height: 0.62rem; }
+.carbon-pixel-agent-arm-left { left: 0; }
+.carbon-pixel-agent-arm-right { right: 0; }
+.carbon-pixel-agent-leg { bottom: 0; width: 0.27rem; height: 0.68rem; }
+.carbon-pixel-agent-leg-left { left: 0.28rem; }
+.carbon-pixel-agent-leg-right { right: 0.28rem; }
+
+.carbon-pixel-agent[data-action="typing"] { animation-name: carbon-pixel-agent-type; }
+.carbon-pixel-agent[data-action="blocked"] { color: var(--destructive); animation-name: carbon-pixel-agent-blocked; }
+.carbon-pixel-agent[data-action="complete"] { color: var(--success); animation-name: carbon-pixel-agent-complete; }
+.carbon-pixel-agent[data-phase="1"],
+.carbon-pixel-agent[data-phase="3"] { animation-delay: -0.45s; }
+
+.carbon-pixel-station-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.carbon-pixel-station-meta,
+.carbon-pixel-station-footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+}
+
+.carbon-pixel-task-id {
+  max-width: 68%;
+  overflow: hidden;
+  color: var(--pixel-state);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.carbon-pixel-status,
+.carbon-pixel-action { color: var(--muted-foreground); font-size: 0.65rem; }
+
+.carbon-pixel-station-title {
+  display: -webkit-box;
+  overflow: hidden;
+  min-height: 2.15em;
+  color: var(--foreground);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.08;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.carbon-pixel-type,
+.carbon-pixel-assignee {
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carbon-pixel-type { color: var(--pixel-state); }
+
+.carbon-pixel-scene-note {
+  margin: 0;
+  border-top: 1px solid var(--border);
+  padding: 0.48rem 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.carbon-market-scene {
+  display: flex;
+  flex-direction: column;
+  box-shadow: none;
+}
+
+.carbon-market-toolbar {
+  min-height: 3.45rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 0.7rem;
+  background: var(--card);
+  scrollbar-width: none;
+}
+
+.carbon-market-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.carbon-market-primary,
+.carbon-market-controls,
+.carbon-market-status-strip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.carbon-market-primary {
+  flex: 1 1 auto;
+  gap: 0.8rem;
+}
+
+.carbon-market-controls {
+  flex: 0 0 auto;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.carbon-animation-tuning {
+  width: min(20rem, calc(100vw - 1.5rem));
+}
+
+.carbon-animation-tuning-heading,
+.carbon-animation-tuning-label {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.carbon-animation-tuning-heading {
+  margin-bottom: 1rem;
+}
+
+.carbon-animation-tuning-heading > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.carbon-animation-tuning-heading strong {
+  font-size: 0.8rem;
+}
+
+.carbon-animation-tuning-heading span,
+.carbon-animation-tuning-label output {
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+}
+
+.carbon-animation-tuning-label output {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  background: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.carbon-market-symbol,
+.carbon-market-quote {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.carbon-market-symbol > span { color: var(--foreground); }
+.carbon-market-symbol {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.carbon-market-symbol > small,
+.carbon-market-quote > span { color: var(--muted-foreground); font-size: 0.67rem; }
+.carbon-market-quote {
+  flex: 0 0 auto;
+  border-inline-start: 1px solid var(--border);
+  padding-inline-start: 0.8rem;
+  align-items: flex-start;
+}
+.carbon-market-quote > strong {
+  color: var(--foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92rem;
+}
+.carbon-market-up { color: var(--success) !important; }
+.carbon-market-down { color: var(--destructive) !important; }
+
+.carbon-market-status-strip {
+  gap: 0.65rem;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.carbon-market-status-strip > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.carbon-market-status-strip i {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--muted-foreground);
+}
+
+.carbon-market-status-strip i[data-state="active"] { background: var(--brand); }
+.carbon-market-status-strip i[data-state="completed"] { background: var(--success); }
+.carbon-market-status-strip i[data-state="blocked"] { background: var(--destructive); }
+.carbon-market-status-strip i[data-state="queued"] { background: var(--warning); }
+
+.carbon-market-driver-strip {
+  --market-event: var(--muted-foreground);
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(18rem, 1.2fr) minmax(18rem, 0.8fr);
+  align-items: center;
+  gap: 0.8rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  padding: 0.38rem 0.7rem;
+  background: var(--card);
+}
+
+.carbon-market-driver-strip[data-event="published"] { --market-event: var(--warning); }
+.carbon-market-driver-strip[data-event="claimed"],
+.carbon-market-driver-strip[data-event="processing"] { --market-event: var(--brand); }
+.carbon-market-driver-strip[data-event="completed"],
+.carbon-market-driver-strip[data-event="recovered"] { --market-event: var(--success); }
+.carbon-market-driver-strip[data-event="blocked"] { --market-event: var(--destructive); }
+
+.carbon-market-driver {
+  display: grid;
+  width: 100%;
+  height: auto;
+  min-height: 2.65rem;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  justify-content: stretch;
+  gap: 0.55rem;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) * 1.15);
+  padding: 0.28rem 0.4rem;
+  color: var(--foreground);
+  text-align: start;
+  background: transparent;
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+button.carbon-market-driver:hover,
+button.carbon-market-driver:focus-visible {
+  border-color: color-mix(in oklab, var(--market-event) 28%, var(--border));
+  background: color-mix(in oklab, var(--card) 94%, var(--market-event));
+  transform: translateY(-1px);
+}
+
+.carbon-market-driver-empty {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.carbon-market-driver-icon {
+  position: relative;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--market-event) 34%, var(--border));
+  border-radius: 999px;
+  color: var(--market-event);
+  background: color-mix(in oklab, var(--market-event) 11%, var(--card));
+}
+
+.carbon-market-driver-icon > svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
+.carbon-market-driver-strip:not([data-event="quiet"]) .carbon-market-driver-icon::after {
+  position: absolute;
+  inset: -0.25rem;
+  border: 1px solid color-mix(in oklab, var(--market-event) 48%, transparent);
+  border-radius: inherit;
+  content: "";
+  animation: carbon-market-force-pulse var(--carbon-market-motion, 360ms) cubic-bezier(0.2, 0.75, 0.35, 1) infinite;
+}
+
+.carbon-market-driver-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.08rem;
+}
+
+.carbon-market-driver-kicker,
+.carbon-market-driver-task,
+.carbon-market-driver-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carbon-market-driver-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--market-event);
+  font-size: 0.64rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.carbon-market-driver-task {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--foreground);
+  font-size: 0.72rem;
+  font-weight: 560;
+}
+
+.carbon-market-driver-task > code {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 0.63rem;
+}
+
+.carbon-market-driver-task > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.carbon-market-driver-meta {
+  display: flex;
+  max-width: 8rem;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.04rem;
+}
+
+.carbon-market-driver-meta > strong {
+  color: var(--market-event);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.carbon-market-driver-meta > small {
+  max-width: 7rem;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.58rem;
+  text-overflow: ellipsis;
+}
+
+.carbon-market-driver-open {
+  width: 0.78rem;
+  height: 0.78rem;
+  color: var(--muted-foreground);
+}
+
+.carbon-market-force-strip {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(6rem, 1fr) auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.63rem;
+}
+
+.carbon-market-force-side {
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.carbon-market-force-bull { color: var(--success); }
+.carbon-market-force-bear { color: var(--destructive); }
+
+.carbon-market-force-meter {
+  position: relative;
+  display: flex;
+  height: 0.46rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.carbon-market-force-fill-bull,
+.carbon-market-force-fill-bear {
+  height: 100%;
+  transition: width var(--carbon-market-motion, 360ms) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.carbon-market-force-fill-bull { background: var(--success); }
+.carbon-market-force-fill-bear { background: var(--destructive); }
+
+.carbon-market-force-center {
+  position: absolute;
+  z-index: 1;
+  top: -0.14rem;
+  bottom: -0.14rem;
+  left: 50%;
+  width: 1px;
+  background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 20%, transparent);
+}
+
+.carbon-market-energy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  white-space: nowrap;
+}
+
+.carbon-market-energy > svg {
+  width: 0.72rem;
+  height: 0.72rem;
+  color: var(--market-event);
+}
+
+.carbon-market-chart-shell {
+  position: relative;
+  min-height: 22rem;
+  flex: 1;
+  outline: none;
+}
+
+.carbon-market-chart-shell:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+
+.carbon-market-chart {
+  position: absolute;
+  inset: 0;
+}
+
+.carbon-market-readout {
+  position: absolute;
+  z-index: 1;
+  top: 0.48rem;
+  left: 0.65rem;
+  display: flex;
+  max-width: calc(100% - 5.25rem);
+  min-width: 0;
+  align-items: center;
+  gap: 0.58rem;
+  overflow: hidden;
+  pointer-events: none;
+  border: 1px solid color-mix(in oklab, var(--border) 68%, transparent);
+  border-radius: calc(var(--radius) * 0.8);
+  padding: 0.26rem 0.42rem;
+  color: var(--muted-foreground);
+  background: color-mix(in oklab, var(--card) 88%, transparent);
+  backdrop-filter: blur(8px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.carbon-market-readout strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.carbon-market-readout-time {
+  color: var(--foreground);
+}
+
+.carbon-market-readout-event {
+  overflow: hidden;
+  color: var(--brand);
+  text-overflow: ellipsis;
+}
+
+.carbon-market-event-chips {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+button.carbon-market-event-chip {
+  --market-chip-event: var(--muted-foreground);
+  position: absolute;
+  display: inline-flex;
+  height: 1.34rem;
+  max-width: min(8.6rem, calc(100% - 0.75rem));
+  gap: 0.2rem;
+  overflow: hidden;
+  padding-inline: 0.36rem;
+  pointer-events: auto;
+  border-color: color-mix(in oklab, var(--market-chip-event) 32%, var(--border));
+  border-radius: 999px;
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--card) 91%, var(--market-chip-event));
+  box-shadow: 0 0.25rem 0.8rem color-mix(in oklab, var(--foreground) 8%, transparent);
+  font-size: 0.61rem;
+  font-weight: 620;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+}
+
+button.carbon-market-event-chip[data-side="above"] { transform: translate(-50%, -100%); }
+button.carbon-market-event-chip[data-side="below"] { transform: translate(-50%, 0); }
+
+button.carbon-market-event-chip[data-event="published"] { --market-chip-event: var(--warning); }
+button.carbon-market-event-chip[data-event="claimed"],
+button.carbon-market-event-chip[data-event="processing"] { --market-chip-event: var(--brand); }
+button.carbon-market-event-chip[data-event="completed"],
+button.carbon-market-event-chip[data-event="recovered"] { --market-chip-event: var(--success); }
+button.carbon-market-event-chip[data-event="blocked"] { --market-chip-event: var(--destructive); }
+
+button.carbon-market-event-chip:hover,
+button.carbon-market-event-chip:focus-visible {
+  border-color: color-mix(in oklab, var(--market-chip-event) 58%, var(--border));
+  background: color-mix(in oklab, var(--card) 82%, var(--market-chip-event));
+}
+
+.carbon-market-event-chip > svg {
+  width: 0.66rem;
+  height: 0.66rem;
+  flex: 0 0 auto;
+  color: var(--market-chip-event);
+}
+
+.carbon-market-event-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.carbon-market-event-chip > small {
+  flex: 0 0 auto;
+  color: var(--market-chip-event);
+  font-size: 0.55rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.carbon-market-preview-anchor {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.carbon-market-task-preview {
+  width: min(19rem, calc(100vw - 1.5rem));
+}
+
+.carbon-market-task-preview-card {
+  width: 100%;
+  --card-spacing: 0.75rem;
+}
+
+.carbon-market-preview-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--brand);
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.carbon-market-preview-event > svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.carbon-market-preview-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carbon-market-preview-id {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carbon-market-preview-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 0.7fr);
+  gap: 0.45rem;
+}
+
+.carbon-market-preview-facts > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+
+.carbon-market-preview-facts > div > span {
+  color: var(--muted-foreground);
+  font-size: 0.62rem;
+}
+
+.carbon-market-preview-facts strong {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.73rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carbon-market-preview-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+
+.carbon-market-preview-open {
+  min-width: 6.5rem;
+}
+
+.carbon-market-footer {
+  min-height: 2.6rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  padding: 0.35rem 0.55rem;
+  background: var(--card);
+}
+
+.carbon-market-event-rail {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.15rem;
+  overflow: hidden;
+}
+
+.carbon-market-event-current {
+  overflow: hidden;
+}
+
+.carbon-market-event-position,
+.carbon-market-event-id {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.67rem;
+}
+
+.carbon-market-event-id {
+  max-width: 11rem;
+  overflow: hidden;
+  color: var(--foreground);
+  text-overflow: ellipsis;
+}
+
+.carbon-market-event-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--foreground);
+  text-align: start;
+  text-overflow: ellipsis;
+}
+
+.carbon-market-event-empty {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding-inline: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carbon-market-marker-dot {
+  width: 0.36rem;
+  height: 0.36rem;
+  border-radius: 999px;
+}
+
+.carbon-market-marker-dot[data-event="published"] { background: var(--warning); }
+.carbon-market-marker-dot[data-event="claimed"],
+.carbon-market-marker-dot[data-event="processing"] { background: var(--brand); }
+.carbon-market-marker-dot[data-event="completed"],
+.carbon-market-marker-dot[data-event="recovered"] { background: var(--success); }
+.carbon-market-marker-dot[data-event="blocked"] { background: var(--destructive); }
+
+.carbon-market-event-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carbon-animation-board-compact .carbon-pixel-scene-header,
+.carbon-animation-board-compact .carbon-market-toolbar,
+.carbon-animation-board-compact .carbon-market-footer { padding: 0.5rem 0.6rem; }
+
+.carbon-animation-board-compact .carbon-market-toolbar {
+  min-height: 2.65rem;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+}
+.carbon-animation-board-compact .carbon-market-symbol > small,
+.carbon-animation-board-compact .carbon-market-quote > span,
+.carbon-animation-board-compact .carbon-market-status-strip { display: none; }
+.carbon-animation-board-compact .carbon-market-symbol { display: none; }
+.carbon-animation-board-compact .carbon-market-primary { flex: 0 0 auto; gap: 0.45rem; }
+.carbon-animation-board-compact .carbon-market-quote {
+  border-inline-start: 0;
+  padding-inline-start: 0;
+}
+.carbon-animation-board-compact .carbon-market-quote > strong { font-size: 0.78rem; }
+.carbon-animation-board-compact .carbon-market-chart-shell { min-height: 8rem; }
+.carbon-animation-board-compact .carbon-market-driver-strip {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  padding: 0.25rem 0.45rem;
+}
+.carbon-animation-board-compact .carbon-market-driver {
+  min-height: 2.1rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0.18rem 0.28rem;
+}
+.carbon-animation-board-compact .carbon-market-driver-icon { width: 1.55rem; height: 1.55rem; }
+.carbon-animation-board-compact .carbon-market-driver-task,
+.carbon-animation-board-compact .carbon-market-driver-meta,
+.carbon-animation-board-compact .carbon-market-driver-open,
+.carbon-animation-board-compact .carbon-market-force-side,
+.carbon-animation-board-compact .carbon-market-energy { display: none; }
+.carbon-animation-board-compact .carbon-market-force-strip { grid-template-columns: 5.5rem; }
+.carbon-animation-board-compact .carbon-market-readout {
+  gap: 0.38rem;
+  font-size: 0.57rem;
+}
+.carbon-animation-board-compact button.carbon-market-event-chip { height: 1.3rem; max-width: 7rem; font-size: 0.59rem; }
+.carbon-animation-board-compact .carbon-market-event-chip > svg { width: 0.68rem; height: 0.68rem; }
+.carbon-animation-board-compact .carbon-market-task-preview { width: min(17rem, calc(100vw - 1rem)); }
+.carbon-animation-board-compact .carbon-market-readout-time,
+.carbon-animation-board-compact .carbon-market-readout-event,
+.carbon-animation-board-compact .carbon-market-readout > span:nth-of-type(2),
+.carbon-animation-board-compact .carbon-market-readout > span:nth-of-type(3),
+.carbon-animation-board-compact .carbon-market-readout > span:nth-of-type(4) { display: none; }
+.carbon-animation-board-compact .carbon-market-footer {
+  min-height: 2.35rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.carbon-animation-board-compact .carbon-market-event-id,
+.carbon-animation-board-compact .carbon-market-event-meta,
+.carbon-animation-board-compact .carbon-market-event-current [data-slot="badge"] { display: none; }
+.carbon-animation-board-compact .carbon-pixel-floor { min-width: 40rem; min-height: 15rem; grid-auto-rows: 8.4rem; }
+.carbon-animation-board-compact .carbon-pixel-scene-note { display: none; }
+
+@keyframes carbon-pixel-screen {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0.3; transform: translateX(0.34rem); }
+}
+
+@keyframes carbon-pixel-alert {
+  from { opacity: 1; }
+  to { opacity: 0.35; }
+}
+
+@keyframes carbon-pixel-agent-idle {
+  from { transform: translateY(0); }
+  to { transform: translateY(-0.16rem); }
+}
+
+@keyframes carbon-pixel-agent-type {
+  from { transform: translateX(0); }
+  to { transform: translateX(0.18rem); }
+}
+
+@keyframes carbon-pixel-agent-blocked {
+  from { transform: translateX(-0.1rem); }
+  to { transform: translateX(0.1rem); }
+}
+
+@keyframes carbon-pixel-agent-complete {
+  from { transform: translateY(0); opacity: 0.75; }
+  to { transform: translateY(-0.34rem); opacity: 1; }
+}
+
+@keyframes carbon-market-force-pulse {
+  from { opacity: 0.72; transform: scale(0.78); }
+  to { opacity: 0; transform: scale(1.32); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .carbon-pixel-agent,
+  .carbon-pixel-terminal > span,
+  .carbon-pixel-barrier,
+  .carbon-pixel-delivery-gate,
+  .carbon-pixel-station,
+  .carbon-market-driver-icon::after {
+    animation: none;
+    transition: none;
+  }
+
+  .carbon-market-force-fill-bull,
+  .carbon-market-force-fill-bear { transition: none; }
+}
+
+@media (max-width: 64rem) {
+  .carbon-market-status-strip { display: none; }
+  .carbon-market-driver-strip { grid-template-columns: minmax(16rem, 1fr) minmax(13rem, 0.72fr); }
+  .carbon-market-energy { display: none; }
+  .carbon-market-force-strip { grid-template-columns: auto minmax(5rem, 1fr) auto; }
+}
+
+@media (max-width: 42rem) {
+  .carbon-pixel-scene-header { align-items: flex-start; flex-wrap: wrap; }
+  .carbon-market-toolbar,
+  .carbon-market-footer { flex-wrap: nowrap; }
+  .carbon-market-primary { flex: 0 0 auto; }
+  .carbon-market-status-strip { display: none; }
+  .carbon-market-driver-strip {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.3rem;
+    padding: 0.35rem 0.5rem;
+  }
+  .carbon-market-driver-meta,
+  .carbon-market-driver-open { display: none; }
+  .carbon-market-force-strip { grid-template-columns: auto minmax(5rem, 1fr) auto; }
+  .carbon-market-readout {
+    gap: 0.42rem;
+    font-size: 0.59rem;
+  }
+  .carbon-market-readout-time,
+  .carbon-market-readout-event { display: none; }
+  .carbon-market-event-id,
+  .carbon-market-event-meta,
+  .carbon-market-event-current [data-slot="badge"] { display: none; }
+  .carbon-market-chart-shell { min-height: 17rem; }
+}

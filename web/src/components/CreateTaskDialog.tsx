@@ -322,11 +322,11 @@ export function CreateTaskDialog({
 
         {!carbonAvailable && (
           <Alert>
-            <AlertTitle>{t("Carbon fields are waiting for a stable v2 sidecar", "Carbon 字段等待 stable v2 sidecar")}</AlertTitle>
+            <AlertTitle>{t("Some task fields are not available yet", "部分任务属性暂不可用")}</AlertTitle>
             <AlertDescription>
               {t(
-                "Basic tasks remain compatible. Project ID, type, and importance stay disabled until the server advertises Carbon stable v2. Assign an owner after creation through the lease workflow.",
-                "基础任务仍保持兼容。项目 ID、类型和重要性会在服务端声明 Carbon stable v2 后启用；负责人请在创建后通过租约流程分配。",
+                "You can still create the task. Update Carbon to set its project, type, and importance here; a worker can take it over after creation.",
+                "任务仍可正常创建。更新 Carbon 后即可在这里设置项目、类型和重要性；创建后可由智能体接手。",
               )}
             </AlertDescription>
           </Alert>

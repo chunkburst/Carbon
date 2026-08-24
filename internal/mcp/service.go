@@ -159,6 +159,21 @@ type TaskView struct {
 	UpdatedAt      string `json:"updatedAt,omitempty"`
 	ExecutionState string `json:"executionState,omitempty"`
 	SessionID      string `json:"sessionId,omitempty"`
+	// Provenance is a deliberately redacted, HTTP-only list projection used by the
+	// optional task-market view. Keep it out of normal TaskView JSON so MCP list
+	// responses retain their established summary shape.
+	Provenance []MarketProvenance `json:"-"`
+}
+
+// MarketProvenance is the safe subset of a task audit entry needed to derive a
+// task-market timeline. In particular, free-form note text never crosses this
+// boundary, even when callers explicitly opt in to market history.
+type MarketProvenance struct {
+	ID       string `json:"id,omitempty"`
+	Who      string `json:"who"`
+	At       string `json:"at"`
+	Did      string `json:"did"`
+	EditedAt string `json:"editedAt,omitempty"`
 }
 
 // List returns tasks, optionally filtered by status, assignee, and readiness. A nil
@@ -178,6 +193,17 @@ func (svc *Service) ListWithExecution(status, assignee string, ready *bool, exec
 // so opting in cannot expose another cluster. Legacy stores keep their historical
 // unfiltered behaviour.
 func (svc *Service) ListScoped(status, assignee string, ready *bool, execution string, includeCluster bool) ([]TaskView, error) {
+	return svc.listScoped(status, assignee, ready, execution, includeCluster, false)
+}
+
+// ListMarketHistoryScoped is the explicit, redacted list path for the local task
+// market visualization. It keeps the same filtering and scope rules as ListScoped,
+// while making the immutable activity metadata available to the HTTP adapter only.
+func (svc *Service) ListMarketHistoryScoped(status, assignee string, ready *bool, execution string, includeCluster bool) ([]TaskView, error) {
+	return svc.listScoped(status, assignee, ready, execution, includeCluster, true)
+}
+
+func (svc *Service) listScoped(status, assignee string, ready *bool, execution string, includeCluster, withMarketHistory bool) ([]TaskView, error) {
 	if err := svc.validateIncludeCluster(includeCluster); err != nil {
 		return nil, err
 	}
@@ -229,10 +255,31 @@ func (svc *Service) ListScoped(status, assignee string, ready *bool, execution s
 		if execution != "" && execution != executionState {
 			continue
 		}
-		out = append(out, TaskView{Task: t, Ready: r, UpdatedAt: lastActivity(d), ExecutionState: executionState, SessionID: sessionID})
+		view := TaskView{Task: t, Ready: r, UpdatedAt: lastActivity(d), ExecutionState: executionState, SessionID: sessionID}
+		if withMarketHistory {
+			view.Provenance = marketProvenance(d.Provenance)
+		}
+		out = append(out, view)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+func marketProvenance(entries []store.Provenance) []MarketProvenance {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]MarketProvenance, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, MarketProvenance{
+			ID:       entry.ID,
+			Who:      entry.Who,
+			At:       entry.At,
+			Did:      entry.Did,
+			EditedAt: entry.EditedAt,
+		})
+	}
+	return out
 }
 
 func (svc *Service) executionFor(t task.Task, d *store.SessionDoc, cfg config.Config) (string, string, error) {
@@ -542,6 +589,16 @@ func (svc *Service) UpdateWithVersion(id string, f UpdateFields, expectedVersion
 	if f.Priority == nil && f.Labels == nil && f.Deps == nil && f.Parent == nil && f.Title == nil && f.Body == nil && f.Checks == nil && f.ProjectID == nil && f.Type == nil && f.Importance == nil && f.Assignee == nil && f.BlockerReason == nil && f.Evidence == nil {
 		return doc, nil // nothing to change — don't write a spurious provenance entry
 	}
+	// Blocker reasons are editable text, but entering or leaving the blocked state is
+	// a meaningful event in its own right. Capture that state before mutating the doc
+	// so a text-only edit stays an ordinary update while a state switch gets dedicated
+	// provenance below.
+	blockerWasSet := false
+	blockerIsSet := false
+	if f.BlockerReason != nil {
+		blockerWasSet = strings.TrimSpace(doc.Task.BlockerReason) != ""
+		blockerIsSet = strings.TrimSpace(*f.BlockerReason) != ""
+	}
 	if f.Assignee != nil && svc.scope.IsCarbon() {
 		return nil, ErrAssigneeLeaseRequired
 	}
@@ -653,7 +710,22 @@ func (svc *Service) UpdateWithVersion(id string, f UpdateFields, expectedVersion
 			return nil, err
 		}
 	}
-	doc.AppendProvenance(svc.actor, "updated", "", svc.now())
+	at := svc.now()
+	if f.BlockerReason != nil && blockerWasSet != blockerIsSet {
+		if blockerIsSet {
+			doc.AppendProvenance(svc.actor, "blocked", doc.Task.BlockerReason, at)
+		} else {
+			doc.AppendProvenance(svc.actor, "unblocked", "", at)
+		}
+
+		// A blocker-state-only mutation is fully described by blocked/unblocked. When
+		// the same request changes other fields, retain the existing broad update audit.
+		if f.Priority != nil || f.Labels != nil || f.Deps != nil || f.Parent != nil || f.Title != nil || f.Body != nil || f.Checks != nil || f.ProjectID != nil || f.Type != nil || f.Importance != nil || f.Assignee != nil || f.Evidence != nil {
+			doc.AppendProvenance(svc.actor, "updated", "", at)
+		}
+	} else {
+		doc.AppendProvenance(svc.actor, "updated", "", at)
+	}
 	if err := svc.store.SaveIfVersion(doc, expectedVersion); err != nil {
 		return nil, err
 	}

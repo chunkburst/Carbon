@@ -1,5 +1,6 @@
-import { ClipboardCopy, ExternalLink, Eye, FileText, MoreHorizontal, Pencil, Trash2, UserRound } from "lucide-react";
+import { ClipboardCopy, ExternalLink, Eye, FileText, MessageSquareDashed, MoreHorizontal, Pencil, Trash2, UserRound } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -28,7 +29,7 @@ import {
 } from "@/components/ui/table";
 import { WorkerIdentity } from "@/components/WorkerIdentity";
 import { WorkLogVisibilityBadge } from "@/components/WorkLogVisibilityBadge";
-import { workLogTaskNavigationTarget, type TaskNavigationTarget, type WorkLog } from "@/components/WorkLogTypes";
+import { workLogCoordinationDraft, workLogTaskNavigationTarget, type TaskNavigationTarget, type WorkLog } from "@/components/WorkLogTypes";
 import { useI18n } from "@/lib/i18n";
 import { cn, timeAgo } from "@/lib/utils";
 import type { WorkerAliasMap } from "@/lib/worker-aliases";
@@ -83,20 +84,20 @@ export function WorkLogTable({
   const copyLogId = async (id: string) => {
     try {
       await copyText(id);
-      toast.success(t("Work Log ID copied", "Work Log ID 已复制"));
+      toast.success(t("Work log ID copied", "工作日志 ID 已复制"));
     } catch {
       toast.error(t("Could not copy to the clipboard", "无法复制到剪贴板"));
     }
   };
   if (!logs.length) {
-    return <div className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyLabel ?? t("No Work Logs match this view.", "没有符合当前视图的 Work Logs。")}</div>;
+    return <div className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyLabel ?? t("No work logs match this view.", "没有符合当前视图的工作日志。")}</div>;
   }
   return (
     <Table className={cn("min-w-[760px] text-[13px]", compact && "min-w-[620px]")}>
       <TableHeader>
         <TableRow>
           <TableHead className="h-8 w-24 px-4 text-xs">{t("Updated", "更新")}</TableHead>
-          {!compact && <TableHead className="h-8 w-48 text-xs">Worker</TableHead>}
+          {!compact && <TableHead className="h-8 w-48 text-xs">{t("Agent", "智能体")}</TableHead>}
           <TableHead className="h-8 text-xs">{t("Entry", "记录")}</TableHead>
           <TableHead className="h-8 w-28 text-xs">{t("Visibility", "可见性")}</TableHead>
           {!compact && <TableHead className="h-8 w-40 text-xs">{t("Scope", "范围")}</TableHead>}
@@ -107,8 +108,12 @@ export function WorkLogTable({
       <TableBody>
         {logs.map((log) => {
           const pending = pendingID === log.id;
-          const editAllowed = Boolean(onEdit && (canEdit?.(log) ?? true));
-          const deleteAllowed = Boolean(onDelete && (canDelete?.(log) ?? true));
+          const coordination = workLogCoordinationDraft(log);
+          const displayTags = coordination?.userTags ?? log.tags ?? [];
+          // Coordination drafts are an append-only message stream. Replies are
+          // new Work Logs in the same thread, never edits of the original.
+          const editAllowed = Boolean(!coordination && onEdit && (canEdit?.(log) ?? true));
+          const deleteAllowed = Boolean(!coordination && onDelete && (canDelete?.(log) ?? true));
           const taskTarget = workLogTaskNavigationTarget(log);
           return (
             <ContextMenu key={log.id}>
@@ -117,7 +122,7 @@ export function WorkLogTable({
                   tabIndex={0}
                   data-carbon-context-surface
                   data-carbon-task-surface
-                  aria-label={t("Work Log {id}", "Work Log {id}", { id: log.id })}
+                  aria-label={t("Work log {id}", "工作日志 {id}", { id: log.id })}
                   className="group border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted"
                 >
                   <TableCell className="px-4 py-2 align-top">
@@ -138,8 +143,11 @@ export function WorkLogTable({
                   )}
                   <TableCell className="max-w-[32rem] py-2 align-top">
                     <div className="flex min-w-0 items-center gap-1.5">
-                      <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                      {coordination
+                        ? <MessageSquareDashed className="size-3.5 shrink-0 text-brand" />
+                        : <FileText className="size-3.5 shrink-0 text-muted-foreground" />}
                       <span className="truncate font-medium">{log.title}</span>
+                      {coordination && <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px]">{t("Team draft", "团队草稿")}</Badge>}
                     </div>
                     {log.body && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{firstLine(log.body)}</p>}
                     {compact && <div className="mt-0.5"><WorkerIdentity actor={log.worker} aliases={aliases} compact /></div>}
@@ -153,8 +161,10 @@ export function WorkLogTable({
                   {!compact && (
                     <TableCell className="py-2 align-top">
                       <div className="flex flex-wrap gap-1">
-                        {(log.tags ?? []).slice(0, 3).map((tag) => <span key={tag} className="rounded border bg-muted/35 px-1.5 py-0.5 text-[10px] text-muted-foreground">{tag}</span>)}
-                        {(log.tags?.length ?? 0) > 3 && <span className="text-[10px] text-muted-foreground">+{(log.tags?.length ?? 0) - 3}</span>}
+                        {coordination?.thread && <span className="rounded border border-brand/25 bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] text-brand">#{coordination.thread}</span>}
+                        {coordination && <span className="rounded border bg-muted/35 px-1.5 py-0.5 text-[10px] text-muted-foreground" title={coordination.recipients.join(", ")}>{coordination.recipients.length ? t("To {count}", "发给 {count} 位", { count: coordination.recipients.length }) : t("Project broadcast", "项目广播")}</span>}
+                        {displayTags.slice(0, coordination ? 1 : 3).map((tag) => <span key={tag} className="rounded border bg-muted/35 px-1.5 py-0.5 text-[10px] text-muted-foreground">{tag}</span>)}
+                        {displayTags.length > (coordination ? 1 : 3) && <span className="text-[10px] text-muted-foreground">+{displayTags.length - (coordination ? 1 : 3)}</span>}
                       </div>
                     </TableCell>
                   )}
@@ -162,15 +172,15 @@ export function WorkLogTable({
                     <TableCell className="px-2 py-2 align-top text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon-xs" aria-label={t("Work Log actions", "Work Log 操作")} disabled={pending}><MoreHorizontal /></Button>
+                          <Button variant="ghost" size="icon-xs" aria-label={t("Work log actions", "工作日志操作")} disabled={pending}><MoreHorizontal /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-52">
                           <DropdownMenuLabel className="truncate font-mono text-[10px]">{log.id}</DropdownMenuLabel>
                           {onView && <DropdownMenuItem onSelect={() => onView(log)}><Eye />{t("View details", "查看详情")}</DropdownMenuItem>}
                           {onOpenTask && taskTarget && <DropdownMenuItem onSelect={() => onOpenTask(taskTarget)}><ExternalLink />{t("Open linked task", "打开关联任务")}</DropdownMenuItem>}
-                          {onOpenWorker && <DropdownMenuItem onSelect={() => onOpenWorker(log.worker)}><UserRound />{t("Open Worker", "打开 Worker")}</DropdownMenuItem>}
+                          {onOpenWorker && <DropdownMenuItem onSelect={() => onOpenWorker(log.worker)}><UserRound />{t("Open agent profile", "打开智能体档案")}</DropdownMenuItem>}
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem onSelect={() => void copyLogId(log.id)}><ClipboardCopy />{t("Copy Work Log ID", "复制 Work Log ID")}</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void copyLogId(log.id)}><ClipboardCopy />{t("Copy work log ID", "复制工作日志 ID")}</DropdownMenuItem>
                           {(editAllowed || deleteAllowed) && <DropdownMenuSeparator />}
                           {editAllowed && <DropdownMenuItem onSelect={() => onEdit?.(log)}><Pencil />{t("Edit", "编辑")}</DropdownMenuItem>}
                           {deleteAllowed && <DropdownMenuItem variant="destructive" onSelect={() => onDelete?.(log)}><Trash2 />{t("Delete", "删除")}</DropdownMenuItem>}
@@ -185,11 +195,11 @@ export function WorkLogTable({
                 <ContextMenuGroup>
                   {onView && <ContextMenuItem disabled={pending} onSelect={() => onView(log)}><Eye />{t("View details", "查看详情")}</ContextMenuItem>}
                   {onOpenTask && taskTarget && <ContextMenuItem onSelect={() => onOpenTask(taskTarget)}><ExternalLink />{t("Open linked task", "打开关联任务")}</ContextMenuItem>}
-                  {onOpenWorker && <ContextMenuItem onSelect={() => onOpenWorker(log.worker)}><UserRound />{t("Open Worker", "打开 Worker")}</ContextMenuItem>}
+                  {onOpenWorker && <ContextMenuItem onSelect={() => onOpenWorker(log.worker)}><UserRound />{t("Open agent profile", "打开智能体档案")}</ContextMenuItem>}
                 </ContextMenuGroup>
                 <ContextMenuSeparator />
                 <ContextMenuGroup>
-                  <ContextMenuItem onSelect={() => void copyLogId(log.id)}><ClipboardCopy />{t("Copy Work Log ID", "复制 Work Log ID")}</ContextMenuItem>
+                  <ContextMenuItem onSelect={() => void copyLogId(log.id)}><ClipboardCopy />{t("Copy work log ID", "复制工作日志 ID")}</ContextMenuItem>
                 </ContextMenuGroup>
                 {(editAllowed || deleteAllowed) && <ContextMenuSeparator />}
                 {(editAllowed || deleteAllowed) && (

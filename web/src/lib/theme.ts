@@ -5,27 +5,52 @@ export type Theme = "light" | "dark";
 const KEY = "carbon-theme";
 const LEGACY_KEY = "cairn-theme";
 
+// WebView2 can briefly expose a storage area that is unavailable (for example while a
+// secondary native webview is being initialized, or when its profile is locked by another
+// process). Theme setup runs before React mounts, so a storage exception here would leave the
+// entire floating window on the native blank/black surface. Keep the preference best-effort and
+// always fall back to the system theme for that session.
+function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // A theme should never prevent the app from mounting.
+  }
+}
+
+function systemTheme(): Theme {
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
 export function getTheme(): Theme {
-  const saved = localStorage.getItem(KEY);
+  const saved = readStorage(KEY);
   if (saved === "light" || saved === "dark") return saved;
   if (saved === null) {
-    const legacy = localStorage.getItem(LEGACY_KEY);
+    const legacy = readStorage(LEGACY_KEY);
     if (legacy === "light" || legacy === "dark") {
-      try {
-        localStorage.setItem(KEY, legacy);
-        localStorage.removeItem(LEGACY_KEY);
-      } catch {
-        // The selected theme still applies for this session.
-      }
+      writeStorage(KEY, legacy);
+      try { localStorage.removeItem(LEGACY_KEY); } catch { /* best effort migration */ }
       return legacy;
     }
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return systemTheme();
 }
 
 export function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
-  localStorage.setItem(KEY, theme);
+  writeStorage(KEY, theme);
 }
 
 export function toggleTheme(): Theme {

@@ -83,9 +83,9 @@ export function WorkLogEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><FilePenLine className="size-4 text-brand" />{log ? t("Edit Work Log", "编辑 Work Log") : t("New Work Log", "新建 Work Log")}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><FilePenLine className="size-4 text-brand" />{log ? t("Edit work log", "编辑工作日志") : t("New work log", "新建工作日志")}</DialogTitle>
           <DialogDescription>
-            {t("Work Logs are durable operational notes. The server stamps Worker and audit identity.", "Work Logs 是持久化的运营记录。服务端会盖章 Worker 与审计身份。")}
+            {t("Keep a clear note of progress, decisions, and handoffs. Carbon records who wrote it and when it changed.", "记录进展、决策和交接。Carbon 会自动保留记录人和更新时间。")}
           </DialogDescription>
         </DialogHeader>
 
@@ -128,14 +128,14 @@ export function WorkLogEditorDialog({
           </label>
 
           <label className="grid gap-1.5 text-sm">
-            <span>{t("Details", "详情")}</span>
+            <span>{t("Record details", "记录内容")}</span>
             <Textarea value={draft.body ?? ""} maxLength={64 * 1024} className="min-h-36" onChange={(event) => set("body", event.target.value)} placeholder={t("Context, outcome, links, or next action…", "背景、结果、链接或下一步行动…")} />
           </label>
 
           {log && (
             <div className="grid gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground sm:grid-cols-2">
-              <span className="sm:col-span-2 text-[10px] font-medium tracking-wide uppercase">{t("Audit fields", "审计字段")}</span>
-              <span className="flex items-center gap-1.5">{t("Worker", "Worker")}<WorkerIdentity actor={log.worker} compact /></span>
+              <span className="sm:col-span-2 text-[10px] font-medium tracking-wide uppercase">{t("Record information", "记录信息")}</span>
+              <span className="flex items-center gap-1.5">{t("Agent", "智能体")}<WorkerIdentity actor={log.worker} compact /></span>
               <span>{t("Cluster", "集群")} <code className="font-mono">{log.clusterId}</code></span>
               <span>{t("Created", "创建")} {timeAgo(log.createdAt)} · {log.createdBy}</span>
               <span>{t("Updated", "更新")} {timeAgo(log.updatedAt)} · {log.updatedBy}</span>
@@ -147,7 +147,7 @@ export function WorkLogEditorDialog({
 
         <DialogFooter>
           <Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>{t("Cancel", "取消")}</Button>
-          <Button disabled={pending} onClick={() => void submit()}>{log ? t("Save Work Log", "保存 Work Log") : t("Create Work Log", "创建 Work Log")}</Button>
+          <Button disabled={pending} onClick={() => void submit()}>{log ? t("Save work log", "保存工作日志") : t("Create work log", "创建工作日志")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

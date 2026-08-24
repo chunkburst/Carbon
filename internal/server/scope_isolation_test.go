@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,83 @@ func TestProjectScopeRunsRequireExplicitClusterRead(t *testing.T) {
 	}
 	if code, body := raw(f.handler, http.MethodGet, "/api/tasks/"+foreign.Task.ID+"/runs?include_cluster=true", ""); code != http.StatusOK {
 		t.Fatalf("include_cluster foreign runs = %d %s, want 200", code, body)
+	}
+}
+
+func TestTaskListMarketHistoryIsOptInRedactedAndProjectScoped(t *testing.T) {
+	f := newProjectScopeFixture(t)
+	owned := f.createTask(t, f.project1.ID, "owned market task")
+	foreign := f.createTask(t, f.project2.ID, "foreign market task")
+
+	if err := owned.AppendProvenance("agent:owner", "note", "market history private text", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	note := owned.Provenance[len(owned.Provenance)-1]
+	if err := owned.EditNote(note.ID, -1, "market history edited private text", time.Now().UTC().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Save(owned); err != nil {
+		t.Fatal(err)
+	}
+
+	var ordinary struct {
+		Tasks []taskDTO `json:"tasks"`
+	}
+	call(t, f.handler, http.MethodGet, "/api/tasks", "", &ordinary)
+	if len(ordinary.Tasks) != 1 || ordinary.Tasks[0].ID != owned.Task.ID {
+		t.Fatalf("ordinary project list = %#v, want only %s", ordinary.Tasks, owned.Task.ID)
+	}
+	if len(ordinary.Tasks[0].Provenance) != 0 {
+		t.Fatalf("ordinary list unexpectedly included provenance: %#v", ordinary.Tasks[0].Provenance)
+	}
+
+	code, body := raw(f.handler, http.MethodGet, "/api/tasks?market_history=true", "")
+	if code != http.StatusOK {
+		t.Fatalf("market history list = %d %s", code, body)
+	}
+	if strings.Contains(body, "market history private text") {
+		t.Fatalf("market history leaked free-form provenance text: %s", body)
+	}
+	var opted struct {
+		Tasks []taskDTO `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(body), &opted); err != nil {
+		t.Fatal(err)
+	}
+	if len(opted.Tasks) != 1 || opted.Tasks[0].ID != owned.Task.ID {
+		t.Fatalf("market history project list = %#v, want only %s", opted.Tasks, owned.Task.ID)
+	}
+	if len(opted.Tasks[0].Provenance) != 2 {
+		t.Fatalf("market history provenance = %#v, want created and note entries", opted.Tasks[0].Provenance)
+	}
+	last := opted.Tasks[0].Provenance[len(opted.Tasks[0].Provenance)-1]
+	if last.ID == "" || last.Who != "agent:owner" || last.At == "" || last.Did != "note" || last.EditedAt == "" || last.Text != "" {
+		t.Fatalf("redacted market provenance = %#v", last)
+	}
+
+	var wire struct {
+		Tasks []struct {
+			Provenance []map[string]json.RawMessage `json:"provenance"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(body), &wire); err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{"id": true, "who": true, "at": true, "did": true, "editedAt": true}
+	for _, entry := range wire.Tasks[0].Provenance {
+		for field := range entry {
+			if !allowed[field] {
+				t.Fatalf("market provenance exposed unexpected field %q: %s", field, body)
+			}
+		}
+	}
+
+	var expanded struct {
+		Tasks []taskDTO `json:"tasks"`
+	}
+	call(t, f.handler, http.MethodGet, "/api/tasks?market_history=true&include_cluster=true", "", &expanded)
+	if len(expanded.Tasks) != 2 {
+		t.Fatalf("explicit cluster market history list = %#v, want owned and %s", expanded.Tasks, foreign.Task.ID)
 	}
 }
 

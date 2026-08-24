@@ -206,6 +206,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/init", s.handleInit)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/config", s.handleSetConfig)
+	mux.HandleFunc("GET /api/worker-identities", s.handleListWorkerIdentities)
+	mux.HandleFunc("GET /api/worker-identities/{actor}", s.handleGetWorkerIdentity)
+	mux.HandleFunc("PUT /api/worker-identities/{actor}", s.handlePutWorkerIdentity)
 	mux.HandleFunc("GET /api/tasks", s.handleList)
 	mux.HandleFunc("POST /api/tasks", s.handleCreate)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
@@ -883,12 +886,16 @@ type configReq struct {
 	// (back to the default sh).
 	CheckShell         *string `json:"checkShell"`
 	TrashRetentionDays *int    `json:"trashRetentionDays"`
+	// IdentityMode is optional so legacy callers can keep updating an unrelated
+	// setting without accidentally changing the default-off identity policy.
+	IdentityMode *bool `json:"identityMode"`
 }
 
 type configResp struct {
 	Scope              scopeDTO `json:"scope"`
 	CheckShell         string   `json:"checkShell,omitempty"`
 	TrashRetentionDays int      `json:"trashRetentionDays"`
+	IdentityMode       bool     `json:"identityMode"`
 }
 
 func (s *Server) configScope(r *http.Request, legacyPath string) (requestScope, error) {
@@ -909,7 +916,7 @@ func (s *Server) configResponse(scope requestScope, cfg config.Config) configRes
 	if days <= 0 {
 		days = 30
 	}
-	return configResp{Scope: scopeDTOFrom(scope), CheckShell: cfg.CheckShell, TrashRetentionDays: days}
+	return configResp{Scope: scopeDTOFrom(scope), CheckShell: cfg.CheckShell, TrashRetentionDays: days, IdentityMode: cfg.IdentityMode}
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -946,7 +953,7 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody(errors.New("config requires legacy path/repo or Carbon cluster scope")))
 		return
 	}
-	if scope.Mode == "carbon" && scope.ProjectID != "" {
+	if scope.Mode == "carbon" && scope.ProjectID != "" && !scope.Standalone {
 		writeErr(w, mcp.ErrProjectWriteScope)
 		return
 	}
@@ -974,6 +981,9 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.TrashRetentionDays = *req.TrashRetentionDays
 	}
+	if req.IdentityMode != nil {
+		cfg.IdentityMode = *req.IdentityMode
+	}
 	if err := st.SaveConfig(cfg); err != nil {
 		writeErr(w, err)
 		return
@@ -992,7 +1002,14 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		b, _ := strconv.ParseBool(v)
 		ready = &b
 	}
-	views, err := svc.ListScoped(q.Get("status"), q.Get("assignee"), ready, q.Get("execution"), includeCluster(r))
+	withMarketHistory := marketHistory(r)
+	var views []mcp.TaskView
+	var err error
+	if withMarketHistory {
+		views, err = svc.ListMarketHistoryScoped(q.Get("status"), q.Get("assignee"), ready, q.Get("execution"), includeCluster(r))
+	} else {
+		views, err = svc.ListScoped(q.Get("status"), q.Get("assignee"), ready, q.Get("execution"), includeCluster(r))
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -1003,6 +1020,9 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		dto.UpdatedAt = v.UpdatedAt
 		dto.ExecutionState = v.ExecutionState
 		dto.SessionID = v.SessionID
+		if withMarketHistory {
+			dto.Provenance = marketProvenanceDTO(v.Provenance)
+		}
 		tasks = append(tasks, dto)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
@@ -1545,6 +1565,24 @@ func includeCluster(r *http.Request) bool {
 	}
 	b, _ := strconv.ParseBool(value)
 	return b
+}
+
+// marketHistory is a list-only, explicit opt-in. A task's ordinary list summary
+// deliberately remains free of provenance to preserve the existing API/MCP surface.
+func marketHistory(r *http.Request) bool {
+	b, _ := strconv.ParseBool(r.URL.Query().Get("market_history"))
+	return b
+}
+
+func marketProvenanceDTO(entries []mcp.MarketProvenance) []provDTO {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]provDTO, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, provDTO{ID: entry.ID, Who: entry.Who, At: entry.At, Did: entry.Did, EditedAt: entry.EditedAt})
+	}
+	return out
 }
 
 func writeTaskJSON(w http.ResponseWriter, code int, svc *mcp.Service, doc *store.Doc) {

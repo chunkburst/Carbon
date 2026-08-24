@@ -358,7 +358,7 @@ export function CarbonConnectPanel({
           )) : <p className="text-sm text-muted-foreground">{t("No agent configurations are available for this selected source.", "此选定源中没有可用的智能体配置。")}</p>}
         </div>
       ) : (
-        <Alert><AlertTitle>{t("Carbon Connect API unavailable", "Carbon Connect API 不可用")}</AlertTitle><AlertDescription>{t("This server does not advertise the scoped MCP connection API.", "此服务端未声明带范围的 MCP 连接 API。")}</AlertDescription></Alert>
+        <Alert><AlertTitle>{t("Carbon connections are unavailable", "Carbon 连接功能暂不可用")}</AlertTitle><AlertDescription>{t("Update Carbon to use scoped MCP connections.", "请更新 Carbon 后再使用带范围的 MCP 连接。")}</AlertDescription></Alert>
       )}
     </div>
   );

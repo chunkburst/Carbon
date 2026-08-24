@@ -119,20 +119,13 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 		return fmt.Errorf("store: inspect newly created atomic temp: %w", err)
 	}
 	defer func() {
+		if !closed {
+			_ = tmp.Close()
+		}
 		if !published {
 			// On failures before publication, remove only the exact private staging
 			// object (including Sync/Close/replace failures). Do not remove an
 			// unknown name after a swap, nor any old temporary name after success.
-			// POSIX retains the descriptor through validation, so removing before Close
-			// also prevents an unlinked staging inode from being immediately reused.
-			if !atomicTempRequiresCloseBeforeReplace() {
-				_ = removeAtomicTempFile(tmpName, tempIdentity)
-			}
-		}
-		if !closed {
-			_ = tmp.Close()
-		}
-		if !published && atomicTempRequiresCloseBeforeReplace() {
 			_ = removeAtomicTempFile(tmpName, tempIdentity)
 		}
 	}()
@@ -148,12 +141,10 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 	if err := tmp.Sync(); err != nil {
 		return fmt.Errorf("store: sync atomic temp: %w", err)
 	}
-	if atomicTempRequiresCloseBeforeReplace() {
-		if err := tmp.Close(); err != nil {
-			return fmt.Errorf("store: close atomic temp: %w", err)
-		}
-		closed = true
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("store: close atomic temp: %w", err)
 	}
+	closed = true
 
 	// Do not rely on a check made before serialization: a final path can be swapped
 	// while the temporary file is being written. atomicReplace itself replaces the
@@ -174,12 +165,6 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 		return fmt.Errorf("store: atomically replace %s: %w", path, err)
 	}
 	published = true
-	if !closed {
-		if err := tmp.Close(); err != nil {
-			return fmt.Errorf("%w: close published atomic temp %s: %w", ErrAtomicWritePublished, path, err)
-		}
-		closed = true
-	}
 	if err := validateAtomicRegularFile(path, false); err != nil {
 		return fmt.Errorf("%w: verify published entry %s: %w", ErrAtomicWritePublished, path, err)
 	}

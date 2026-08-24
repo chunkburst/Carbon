@@ -4,10 +4,15 @@ import {
   BarChart3,
   ChevronRight,
   Clock3,
+  ClipboardList,
+  Gauge,
+  History,
+  ListChecks,
   MoreHorizontal,
   Pencil,
   RefreshCw,
   RotateCcw,
+  Search,
   Trash2,
   UserRoundX,
   UsersRound,
@@ -25,6 +30,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -35,35 +48,36 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { WorkerIdentity } from "@/components/WorkerIdentity";
 import { WorkerContextMenu } from "@/components/WorkerContextMenu";
+import { WorkerIdentity } from "@/components/WorkerIdentity";
 import { priorityLabel } from "@/components/PriorityIcon";
 import { recentWorkTaskNavigationTarget, type TaskNavigationTarget } from "@/components/WorkLogTypes";
 import {
+  useCarbonWorkerIdentities,
   useDeleteCarbonWorker,
   usePatchWorkerAlias,
   useResetCarbonWorker,
   useWorkerAliases,
   useWorkerMetrics,
 } from "@/lib/queries";
-import type { CarbonHomeCluster, CarbonScopeInput, CarbonWorkerMetric } from "@/lib/carbon-api";
+import type { CarbonHomeCluster, CarbonScopeInput, CarbonWorkerIdentity, CarbonWorkerMetric } from "@/lib/carbon-api";
 import { useI18n } from "@/lib/i18n";
+import { carbonTaskTypeLabel } from "@/lib/task-labels";
 import { cn, labelTone, timeAgo } from "@/lib/utils";
 import { formatWorkerActor, type WorkerAliasMap } from "@/lib/worker-aliases";
 
@@ -167,9 +181,8 @@ function registryByActor(input: WorkersProps["workerRegistry"]): Record<string, 
 }
 
 /**
- * The Worker roster is intentionally a dense operating table instead of a dashboard.
- * Its local scope selector only changes reporting scope; it never changes the main
- * workspace route or the project selected in the global project switcher.
+ * Worker is a delivery-console directory. It reports durable task signals, not
+ * presence: “recent record” means attributed task activity, never online status.
  */
 export function Workers({
   home,
@@ -194,6 +207,7 @@ export function Workers({
   );
   const [clusterId, setClusterId] = useState(carbonBase?.clusterId ?? "");
   const [projectId, setProjectId] = useState(carbonBase?.projectId ?? "");
+  const [query, setQuery] = useState("");
   const [editingActor, setEditingActor] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState("");
   const [lifecycle, setLifecycle] = useState<{ actor: string; kind: "reset" | "delete"; stage: 1 | 2 } | null>(null);
@@ -220,9 +234,6 @@ export function Workers({
     if (scope === "cluster" && (!clusterId || !allowClusterScope)) setScope("all");
   }, [allowClusterScope, clusterId, projectId, scope]);
 
-  // An independent project has no widening selector. Keep a stale view state
-  // from a previously opened grouped project from turning its metrics into a
-  // home-wide request when the route changes in place.
   const effectiveScope: Scope = allowClusterScope ? scope : "project";
   const effectiveClusterId = allowClusterScope ? clusterId : carbonBase?.clusterId ?? "";
   const effectiveProjectId = allowClusterScope ? projectId : carbonBase?.projectId ?? "";
@@ -238,7 +249,14 @@ export function Workers({
     if (!carbonBase) return carbonScope ?? path;
     return { home: resolvedHome, clusterId: effectiveClusterId || undefined, projectId: effectiveProjectId || undefined };
   }, [carbonBase, carbonScope, effectiveClusterId, effectiveProjectId, path, resolvedHome]);
+  const identityScope = useMemo<CarbonScopeInput>(() => {
+    if (!carbonBase) return carbonScope ?? path;
+    if (carbonBase.home && carbonBase.clusterId) return { home: carbonBase.home, clusterId: carbonBase.clusterId };
+    if (carbonBase.home && carbonBase.projectId) return { home: carbonBase.home, projectId: carbonBase.projectId };
+    return carbonBase;
+  }, [carbonBase, carbonScope, path]);
   const metrics = useWorkerMetrics(metricScope, effectiveScope);
+  const identitiesQuery = useCarbonWorkerIdentities(identityScope, Boolean(identityScope));
   const aliasesQuery = useWorkerAliases(resolvedHome);
   const patchAlias = usePatchWorkerAlias(resolvedHome);
   const resetWorker = useResetCarbonWorker(resolvedHome);
@@ -249,6 +267,16 @@ export function Workers({
   const aliasAvailable = aliasesQuery.data?.available === true;
   const openWorker = onOpenWorker ?? onOpenOwner;
   const registry = useMemo(() => registryByActor(workerRegistry), [workerRegistry]);
+  const identityPayload = identitiesQuery.data?.available ? identitiesQuery.data.data : undefined;
+  const identityAvailable = identityPayload !== undefined;
+  const identityModeEnabled = identityPayload?.modeEnabled === true;
+  const identities = useMemo(
+    () => identityPayload?.modeEnabled
+      ? identityPayload.records ?? []
+      : [],
+    [identityPayload],
+  );
+  const identitiesByActor = useMemo(() => new Map(identities.map((record) => [record.actor, record])), [identities]);
 
   const workers = useMemo(() => {
     const byActor = new Map<string, WorkerMetric>((payload?.workers ?? []).map((worker) => [worker.actor, worker]));
@@ -258,10 +286,31 @@ export function Workers({
     for (const [actor, record] of Object.entries(registry)) {
       if (!record.deletedAt && !byActor.has(actor)) byActor.set(actor, { actor, active: 0, completed: 0 });
     }
+    for (const identity of identities) {
+      if (!byActor.has(identity.actor)) byActor.set(identity.actor, { actor: identity.actor, active: 0, completed: 0 });
+    }
     return [...byActor.values()].sort((left, right) =>
       formatWorkerActor(left.actor, aliases).localeCompare(formatWorkerActor(right.actor, aliases), undefined, { sensitivity: "base" }),
     );
-  }, [aliases, payload?.workers, registry]);
+  }, [aliases, identities, payload?.workers, registry]);
+  const visibleWorkers = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle) return workers;
+    return workers.filter((worker) => {
+      const identity = identitiesByActor.get(worker.actor);
+      const searchable = [
+        worker.actor,
+        formatWorkerActor(worker.actor, aliases),
+        identity?.role,
+        ...(identity?.types ?? []),
+      ].filter(Boolean).join(" ").toLocaleLowerCase();
+      return searchable.includes(needle);
+    });
+  }, [aliases, identitiesByActor, query, workers]);
+  const busiestActiveLoad = useMemo(
+    () => Math.max(1, ...workers.map((worker) => worker.active)),
+    [workers],
+  );
 
   const aggregate = payload?.aggregate;
   const active = aggregate?.active ?? workers.reduce<number>((sum, worker) => sum + worker.active, 0);
@@ -269,19 +318,16 @@ export function Workers({
   const averageCycle = aggregate?.averageCycleSeconds ?? aggregate?.average_cycle_seconds;
   const reopenRate = aggregate?.reopenRate ?? aggregate?.reopen_rate;
   const taskCount = aggregate?.taskCount ?? completed + active;
-  // A central route can still provide a custom implementation, but the normal
-  // Carbon route is self-contained: lifecycle mutations are home-only and never
-  // touch a task file. Keep the component usable without a routing adapter.
   const resolvedLifecycleActions: WorkerLifecycleActions | undefined = lifecycleActions ?? (resolvedHome
     ? {
       onResetWorker: async (actor) => {
         const result = await resetWorker.mutateAsync(actor);
-        if (!result.available) throw new Error("Worker lifecycle needs a newer Carbon sidecar");
+        if (!result.available) throw new Error("Carbon needs an update before team management is available");
         return result.data;
       },
       onDeleteWorker: async (actor) => {
         const result = await deleteWorker.mutateAsync(actor);
-        if (!result.available) throw new Error("Worker lifecycle needs a newer Carbon sidecar");
+        if (!result.available) throw new Error("Carbon needs an update before team management is available");
         return result.data;
       },
     }
@@ -317,8 +363,8 @@ export function Workers({
       setLifecycle(null);
       setConfirmationText("");
     } catch {
-      // Query mutations surface their failure through the shared toast boundary. Keep
-      // the second confirmation open so the user can retry after resolving it.
+      // Query mutations surface failures through the shared toast boundary. Keep the
+      // second confirmation open so a human can retry after resolving the cause.
     } finally {
       setLifecyclePending(false);
     }
@@ -328,35 +374,53 @@ export function Workers({
     effectiveScope === "all" ? "All clusters" : effectiveScope === "cluster" ? "Selected cluster" : "Selected project",
     effectiveScope === "all" ? "全部集群" : effectiveScope === "cluster" ? "所选集群" : "所选项目",
   );
+  const resultLabel = query.trim()
+    ? t("{visible} of {total} agents", "{visible}/{total} 个智能体", { visible: visibleWorkers.length, total: workers.length })
+    : t("{count} agents", "{count} 个智能体", { count: workers.length });
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-panel">
-      <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
+      <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2.5">
           <UsersRound className="size-4 shrink-0 text-brand" />
           <div className="min-w-0">
-            <h1 className="text-sm font-semibold">Worker</h1>
-            <p className="truncate text-xs text-muted-foreground">{t("Roster, delivery health, and recent work", "名册、交付指标与最近工作")}</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-semibold">{t("Agent team", "智能体团队")}</h1>
+            </div>
+            <p className="truncate text-xs text-muted-foreground">{t("See who is moving work forward and what was delivered recently", "谁在推进任务、最近交付了什么，一眼就能看到")}</p>
           </div>
         </div>
-        {allowClusterScope && <ToggleGroup
-          type="single"
-          value={scope}
-          variant="outline"
-          size="sm"
-          spacing={0}
-          onValueChange={(value) => value && setScope(value as Scope)}
-          aria-label={t("Worker reporting scope", "Worker 报告范围")}
-        >
-          <ToggleGroupItem value="all">{t("All", "全部")}</ToggleGroupItem>
-          {allowClusterScope && <ToggleGroupItem value="cluster" disabled={!clusterId}>{t("Cluster", "集群")}</ToggleGroupItem>}
-          <ToggleGroupItem value="project" disabled={!projectId}>{t("Project", "项目")}</ToggleGroupItem>
-        </ToggleGroup>}
+        <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none">
+          <InputGroup className="order-last min-w-44 flex-1 sm:order-none sm:w-64 sm:flex-none">
+            <InputGroupAddon>
+              <Search />
+            </InputGroupAddon>
+            <InputGroupInput
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("Search agents, roles, or task types", "搜索智能体、角色或任务类型")}
+              aria-label={t("Search agents", "搜索智能体")}
+            />
+          </InputGroup>
+          {allowClusterScope && <ToggleGroup
+            type="single"
+            value={scope}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            onValueChange={(value) => value && setScope(value as Scope)}
+            aria-label={t("Agent team scope", "智能体团队范围")}
+          >
+            <ToggleGroupItem value="all">{t("All", "全部")}</ToggleGroupItem>
+            <ToggleGroupItem value="cluster" disabled={!clusterId}>{t("Cluster", "集群")}</ToggleGroupItem>
+            <ToggleGroupItem value="project" disabled={!projectId}>{t("Project", "项目")}</ToggleGroupItem>
+          </ToggleGroup>}
+        </div>
       </header>
 
       {carbonBase && clusters.length > 0 && allowClusterScope && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-4 py-1.5">
-          <span className="text-xs text-muted-foreground">{t("Report", "报告")}</span>
+          <span className="text-xs text-muted-foreground">{t("View", "查看范围")}</span>
           <Select
             value={clusterId || "all"}
             onValueChange={(value) => {
@@ -367,10 +431,12 @@ export function Workers({
               else if (scope === "all" || scope === "project") setScope("cluster");
             }}
           >
-            <SelectTrigger className="h-7 max-w-60 min-w-36 text-xs">{clusterId ? selectedCluster?.name ?? clusterId : t("All clusters", "全部集群")}</SelectTrigger>
+            <SelectTrigger className="h-7 min-w-36 max-w-60 text-xs">{clusterId ? selectedCluster?.name ?? clusterId : t("All clusters", "全部集群")}</SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">{t("All clusters", "全部集群")}</SelectItem>
-              {clusters.map((cluster) => <SelectItem key={cluster.id} value={cluster.id}>{cluster.name}</SelectItem>)}
+              <SelectGroup>
+                <SelectItem value="all">{t("All clusters", "全部集群")}</SelectItem>
+                {clusters.map((cluster) => <SelectItem key={cluster.id} value={cluster.id}>{cluster.name}</SelectItem>)}
+              </SelectGroup>
             </SelectContent>
           </Select>
           <ChevronRight className="size-3 text-muted-foreground" />
@@ -383,10 +449,12 @@ export function Workers({
               setScope(next ? "project" : "cluster");
             }}
           >
-            <SelectTrigger className="h-7 max-w-60 min-w-36 text-xs">{projectId ? selectableProjects.find((project) => project.id === projectId)?.name ?? projectId : t("All projects", "全部项目")}</SelectTrigger>
+            <SelectTrigger className="h-7 min-w-36 max-w-60 text-xs">{projectId ? selectableProjects.find((project) => project.id === projectId)?.name ?? projectId : t("All projects", "全部项目")}</SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">{t("All projects", "全部项目")}</SelectItem>
-              {selectableProjects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+              <SelectGroup>
+                <SelectItem value="all">{t("All projects", "全部项目")}</SelectItem>
+                {selectableProjects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
+              </SelectGroup>
             </SelectContent>
           </Select>
           <span className="ml-auto text-xs text-muted-foreground">{scopeLabel}</span>
@@ -395,153 +463,102 @@ export function Workers({
 
       <div className="min-w-0 flex-1 overflow-y-auto">
         {!available && !metrics.isLoading && (
-          <Alert className="m-4 mb-0 rounded-lg">
-            <AlertTitle>{t("Worker metrics need Carbon stable v2", "Worker 指标需要 Carbon stable v2")}</AlertTitle>
+          <Alert className="m-4 mb-0">
+            <AlertTitle>{t("Work statistics are not available yet", "工作统计暂不可用")}</AlertTitle>
             <AlertDescription>
               {t(
-                "This view does not estimate delivery data from incomplete task records. Upgrade the local sidecar to enable scoped Worker metrics.",
-                "此视图不会从不完整任务记录估算交付数据。请升级本地 sidecar 以启用带范围的 Worker 指标。",
+                "This view does not guess statistics from incomplete task records. Update Carbon to see team statistics for this scope.",
+                "此视图不会根据不完整的任务记录猜测数据。更新 Carbon 后即可查看当前范围的团队统计。",
               )}
             </AlertDescription>
           </Alert>
         )}
 
-        <section className="grid grid-cols-2 border-b sm:grid-cols-4 xl:grid-cols-5" aria-label={t("Worker aggregate metrics", "Worker 汇总指标")}>
-          <AggregateMetric icon={Activity} label={t("Active", "活跃中")} value={available ? String(active) : "—"} />
-          <AggregateMetric icon={BarChart3} label={t("Completed", "已完成")} value={available ? String(completed) : "—"} />
-          <AggregateMetric icon={Clock3} label={t("Average cycle", "平均周期")} value={available ? duration(averageCycle) : "—"} detail={aggregate?.cycleSamples ? t("{count} samples", "{count} 个样本", { count: aggregate.cycleSamples ?? aggregate.cycle_samples ?? 0 }) : undefined} />
-          <AggregateMetric icon={RefreshCw} label={t("Reopen rate", "重开率")} value={available ? percent(reopenRate) : "—"} />
-          <AggregateMetric className="col-span-2 hidden xl:block" icon={UsersRound} label={t("Tasks in scope", "范围内任务")} value={available ? String(taskCount) : "—"} />
-        </section>
+        <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 p-4">
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>{t("Team overview", "团队概览")}</CardTitle>
+              <CardDescription>{t("See what is moving and how the work is progressing", "看看有多少事情正在推进，整体进展如何")}</CardDescription>
+              <CardAction>
+                <Badge variant="outline">{scopeLabel}</Badge>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-5" aria-label={t("Team work statistics", "团队工作统计")}>
+                <AggregateMetric icon={Gauge} label={t("In progress", "处理中")} value={available ? String(active) : "—"} />
+                <AggregateMetric icon={BarChart3} label={t("Delivered", "已交付")} value={available ? String(completed) : "—"} />
+                <AggregateMetric icon={Clock3} label={t("Average completion time", "平均完成用时")} value={available ? duration(averageCycle) : "—"} detail={aggregate?.cycleSamples ? t("Based on {count} completed tasks", "基于 {count} 条已完成任务", { count: aggregate.cycleSamples ?? aggregate.cycle_samples ?? 0 }) : undefined} />
+                <AggregateMetric icon={RefreshCw} label={t("Returned tasks", "返工率")} value={available ? percent(reopenRate) : "—"} />
+                <AggregateMetric className="col-span-2 sm:col-span-1" icon={ClipboardList} label={t("Tasks", "任务数")} value={available ? String(taskCount) : "—"} />
+              </dl>
+            </CardContent>
+          </Card>
 
-        <section className="min-w-0">
-          <div className="flex h-10 items-center justify-between border-b px-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-medium">{t("Worker roster", "Worker 名册")}</h2>
-              {!metrics.isLoading && <span className="text-xs text-muted-foreground">{workers.length}</span>}
+          <section className="min-w-0" aria-labelledby="worker-roster-heading">
+            <div className="flex flex-wrap items-end justify-between gap-2 px-1">
+              <div className="min-w-0">
+                <h2 id="worker-roster-heading" className="text-sm font-medium">{t("Agents at a glance", "智能体一览")}</h2>
+                <p className="truncate text-xs text-muted-foreground">{t("Organized from task activity so you can see each agent's recent work. This is not an online indicator.", "按任务记录整理，方便看清每个智能体最近在做什么；这里不代表在线状态。")}</p>
+              </div>
+              <Badge variant="outline">{resultLabel}</Badge>
             </div>
-            <span className="text-xs text-muted-foreground">{t("Activity, delivery, and recent work", "活动、交付与最近工作")}</span>
-          </div>
 
-          {metrics.isLoading || aliasesQuery.isLoading ? (
-            <WorkerTableSkeleton />
-          ) : workers.length ? (
-            <Table className="min-w-[900px] text-[13px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="h-8 w-56 px-4 text-xs">Worker</TableHead>
-                  <TableHead className="h-8 w-28 text-xs">{t("Activity", "活动")}</TableHead>
-                  <TableHead className="h-8 w-48 text-xs">{t("Completed", "已完成")}</TableHead>
-                  <TableHead className="h-8 w-24 text-xs">{t("Cycle", "周期")}</TableHead>
-                  <TableHead className="h-8 w-24 text-xs">{t("Reopen", "重开")}</TableHead>
-                  <TableHead className="h-8 text-xs">{t("Recent work", "最近工作")}</TableHead>
-                  <TableHead className="h-8 w-11 px-2 text-right text-xs"><span className="sr-only">{t("Actions", "操作")}</span></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {workers.map((worker) => {
+            {metrics.isLoading || aliasesQuery.isLoading ? (
+              <WorkerConsoleSkeleton />
+            ) : visibleWorkers.length ? (
+              <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {visibleWorkers.map((worker) => {
                   const record = registry[worker.actor];
-                  const byPriority = worker.completedByPriority ?? worker.completed_by_priority;
-                  const count = worker.completed || completedCount(byPriority);
-                  const recent = worker.recentWork ?? worker.recent_work ?? [];
-                  const lastActivity = worker.lastActivity ?? worker.last_activity;
-                  const pending = lifecyclePending || resolvedLifecycleActions?.pendingActor === worker.actor;
                   const canonicalLifecycleActor = worker.actor !== "unassigned";
+                  const pending = lifecyclePending || resolvedLifecycleActions?.pendingActor === worker.actor;
                   return (
-                    <WorkerContextMenu
+                    <WorkerConsoleCard
                       key={worker.actor}
-                      actor={worker.actor}
-                      displayName={formatWorkerActor(worker.actor, aliases)}
-                      pending={pending}
+                      worker={worker}
+                      aliases={aliases}
+                      identity={identitiesByActor.get(worker.actor)}
+                      identityAvailable={identityAvailable}
+                      identityModeEnabled={identityModeEnabled}
+                      deleted={Boolean(record?.deletedAt)}
+                      busiestActiveLoad={busiestActiveLoad}
+                      sourceScope={recentWorkSourceScope}
+                      onOpenTask={onOpenTask}
                       onOpenWorker={openWorker}
-                      onEditAlias={canonicalLifecycleActor && aliasAvailable ? () => openAliasEditor(worker.actor) : undefined}
-                      onReset={canonicalLifecycleActor && resolvedLifecycleActions?.onResetWorker ? () => startLifecycle(worker.actor, "reset") : undefined}
-                      onDelete={canonicalLifecycleActor && resolvedLifecycleActions?.onDeleteWorker ? () => startLifecycle(worker.actor, "delete") : undefined}
-                    >
-                    <tr
-                      tabIndex={0}
-                      data-carbon-context-surface
-                      aria-label={t("Worker {actor}", "Worker {actor}", { actor: worker.actor })}
-                      className="group h-13 border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted"
-                    >
-                      <TableCell className="px-4 py-2">
-                        <button
-                          type="button"
-                          className={cn("block min-w-0 text-left", openWorker && "rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
-                          onClick={() => openWorker?.(worker.actor)}
-                          disabled={!openWorker}
-                        >
-                          <WorkerIdentity actor={worker.actor} aliases={aliases} active={worker.active > 0} deleted={Boolean(record?.deletedAt)} />
-                        </button>
-                      </TableCell>
-                      <TableCell className="py-2">
-                        <div className="space-y-0.5">
-                          <span className={cn("text-sm font-medium", worker.active > 0 && "text-success")}>{worker.active}</span>
-                          <span className="ml-1 text-xs text-muted-foreground">{t("active", "活跃")}</span>
-                          {lastActivity && <p className="truncate text-[10px] text-muted-foreground">{timeAgo(lastActivity)}</p>}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-2">
-                        <div className="flex max-w-44 flex-wrap items-center gap-1">
-                          <span className="mr-1 text-sm font-medium">{count}</span>
-                          {Object.entries(byPriority ?? {}).map(([priority, value]) => (
-                            <Badge key={priority} variant="secondary" className={cn("carbon-label h-4 px-1.5 text-[10px]", labelTone(priority))}>
-                              {priorityLabel(priority)} {value}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-2 font-mono text-xs">{duration(worker.averageCycleSeconds ?? worker.average_cycle_seconds)}</TableCell>
-                      <TableCell className="py-2 font-mono text-xs">{percent(worker.reopenRate ?? worker.reopen_rate)}</TableCell>
-                      <TableCell className="max-w-80 py-2">
-                        <RecentWork items={recent} sourceScope={recentWorkSourceScope} onOpenTask={onOpenTask} empty={t("No recent task activity", "暂无最近任务活动")} />
-                      </TableCell>
-                      <TableCell className="px-2 py-2 text-right">
-                        <WorkerActions
-                          actor={worker.actor}
-                          aliases={aliases}
-                          aliasAvailable={canonicalLifecycleActor && aliasAvailable}
-                          pending={pending}
-                          canReset={canonicalLifecycleActor && Boolean(resolvedLifecycleActions?.onResetWorker)}
-                          canDelete={canonicalLifecycleActor && Boolean(resolvedLifecycleActions?.onDeleteWorker)}
-                          onEditAlias={() => openAliasEditor(worker.actor)}
-                          onReset={() => startLifecycle(worker.actor, "reset")}
-                          onDelete={() => startLifecycle(worker.actor, "delete")}
-                          labels={{
-                            actions: t("Worker actions", "Worker 操作"),
-                            alias: t("Edit alias", "编辑别名"),
-                            reset: t("Reset metrics", "重置指标"),
-                            delete: t("Delete Worker", "删除 Worker"),
-                          }}
-                        />
-                      </TableCell>
-                    </tr>
-                    </WorkerContextMenu>
+                      pending={pending}
+                      aliasAvailable={canonicalLifecycleActor && aliasAvailable}
+                      canReset={canonicalLifecycleActor && Boolean(resolvedLifecycleActions?.onResetWorker)}
+                      canDelete={canonicalLifecycleActor && Boolean(resolvedLifecycleActions?.onDeleteWorker)}
+                      onEditAlias={() => openAliasEditor(worker.actor)}
+                      onReset={() => startLifecycle(worker.actor, "reset")}
+                      onDelete={() => startLifecycle(worker.actor, "delete")}
+                    />
                   );
                 })}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-              {t("No Worker activity in this reporting scope yet.", "此报告范围内暂无 Worker 活动。")}
-            </div>
-          )}
-        </section>
+              </div>
+            ) : (
+              <WorkerEmptyState filtered={Boolean(query.trim())} />
+            )}
+          </section>
+        </main>
       </div>
 
       <Dialog open={editingActor !== null} onOpenChange={(open) => !open && closeAliasEditor()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{t("Worker alias", "Worker 别名")}</DialogTitle>
+            <DialogTitle>{t("Agent display name", "智能体显示名称")}</DialogTitle>
             <DialogDescription>
-              {t("The alias is display-only. Carbon continues to use the canonical actor for assignment and audit records.", "别名仅用于显示；Carbon 仍会使用原始 actor 进行分配和审计记录。")}
+              {t("This name is only for display. Carbon still uses the connection ID for task assignments and records.", "名称仅用于显示；Carbon 仍会使用连接标识进行任务分配和记录。")}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <p className="rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">{editingActor}</p>
-            <label className="grid gap-1.5 text-sm">
-              <span>{t("Alias", "别名")}</span>
+          <FieldGroup className="gap-3">
+            <Field>
+              <FieldLabel>{t("Connection ID", "连接标识")}</FieldLabel>
+              <p className="rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">{editingActor}</p>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="worker-alias">{t("Display name", "显示名称")}</FieldLabel>
               <Input
+                id="worker-alias"
                 autoFocus
                 value={aliasDraft}
                 maxLength={256}
@@ -554,16 +571,16 @@ export function Workers({
                   }
                 }}
               />
-            </label>
-          </div>
-          <DialogFooter className="sm:justify-between">
+            </Field>
+          </FieldGroup>
+          <DialogFooter className="flex-wrap gap-2 sm:justify-between">
             <Button variant="destructive" disabled={!editingActor || !aliases[editingActor] || patchAlias.isPending} onClick={removeAlias}>
               <Trash2 data-icon="inline-start" />
-              {t("Remove alias", "移除别名")}
+              {t("Use connection ID as name", "恢复默认名称")}
             </Button>
             <div className="flex gap-2">
               <Button variant="outline" onClick={closeAliasEditor}>{t("Cancel", "取消")}</Button>
-              <Button disabled={!aliasDraft.trim() || patchAlias.isPending} onClick={saveAlias}>{t("Save alias", "保存别名")}</Button>
+              <Button disabled={!aliasDraft.trim() || patchAlias.isPending} onClick={saveAlias}>{t("Save display name", "保存显示名称")}</Button>
             </div>
           </DialogFooter>
         </DialogContent>
@@ -595,31 +612,252 @@ function AggregateMetric({ icon: Icon, label, value, detail, className }: {
   className?: string;
 }) {
   return (
-    <dl className={cn("flex min-h-16 items-center gap-2 border-r px-4 last:border-r-0", className)}>
+    <div className={cn("flex min-w-0 items-center gap-2 rounded-xl bg-muted/45 px-3 py-2.5", className)}>
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0">
-        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dt className="truncate text-xs text-muted-foreground">{label}</dt>
         <dd className="text-base font-semibold tabular-nums">{value}</dd>
         {detail && <span className="block truncate text-[10px] text-muted-foreground">{detail}</span>}
       </div>
-    </dl>
+    </div>
   );
 }
 
-function WorkerTableSkeleton() {
+type WorkerConsoleCardProps = {
+  worker: WorkerMetric;
+  aliases: WorkerAliasMap;
+  identity?: CarbonWorkerIdentity;
+  identityAvailable: boolean;
+  identityModeEnabled: boolean;
+  deleted: boolean;
+  busiestActiveLoad: number;
+  sourceScope?: Pick<TaskNavigationTarget, "clusterId" | "projectId">;
+  onOpenTask?: (target: TaskNavigationTarget) => void;
+  onOpenWorker?: (actor: string) => void;
+  pending: boolean;
+  aliasAvailable: boolean;
+  canReset: boolean;
+  canDelete: boolean;
+  onEditAlias: () => void;
+  onReset: () => void;
+  onDelete: () => void;
+};
+
+function WorkerConsoleCard({
+  worker,
+  aliases,
+  identity,
+  identityAvailable,
+  identityModeEnabled,
+  deleted,
+  busiestActiveLoad,
+  sourceScope,
+  onOpenTask,
+  onOpenWorker,
+  pending,
+  aliasAvailable,
+  canReset,
+  canDelete,
+  onEditAlias,
+  onReset,
+  onDelete,
+}: WorkerConsoleCardProps) {
+  const { t } = useI18n();
+  const completed = worker.completed || completedCount(worker.completedByPriority ?? worker.completed_by_priority);
+  const byPriority = worker.completedByPriority ?? worker.completed_by_priority;
+  const recent = worker.recentWork ?? worker.recent_work ?? [];
+  const lastActivity = worker.lastActivity ?? worker.last_activity;
+  const loadPercent = Math.min(100, Math.round((worker.active / busiestActiveLoad) * 100));
+  const displayName = formatWorkerActor(worker.actor, aliases);
+  const activitySummary = worker.active === 1
+    ? t("Working on 1 task", "正在处理 1 个任务")
+    : worker.active > 1
+      ? t("Working on {count} tasks", "正在处理 {count} 个任务", { count: worker.active })
+      : lastActivity
+        ? t("Has contributed recently", "最近参与过任务")
+        : t("No tasks joined yet", "还没参与过任务");
+  const activeTaskLabel = worker.active === 1
+    ? t("Working on 1 task", "正在做 1 个")
+    : t("Working on {count} tasks", "正在做 {count} 个", { count: worker.active });
+
   return (
-    <div className="space-y-px">
-      {Array.from({ length: 6 }, (_, index) => (
-        <div key={index} className="grid h-14 grid-cols-[14rem_7rem_12rem_6rem_6rem_1fr_2.75rem] items-center gap-3 border-b px-4">
-          <div className="h-7 w-40 animate-pulse rounded bg-muted" />
-          <div className="h-4 w-10 animate-pulse rounded bg-muted" />
-          <div className="h-4 w-28 animate-pulse rounded bg-muted" />
-          <div className="h-4 w-12 animate-pulse rounded bg-muted" />
-          <div className="h-4 w-12 animate-pulse rounded bg-muted" />
-          <div className="h-4 w-52 animate-pulse rounded bg-muted" />
-        </div>
+    <WorkerContextMenu
+      actor={worker.actor}
+      displayName={displayName}
+      pending={pending}
+      onOpenWorker={onOpenWorker}
+      onEditAlias={aliasAvailable ? onEditAlias : undefined}
+      onReset={canReset ? onReset : undefined}
+      onDelete={canDelete ? onDelete : undefined}
+    >
+      <Card size="sm" data-carbon-context-surface className="min-w-0">
+        <CardHeader>
+          <button
+            type="button"
+            className={cn("min-w-0 text-left", onOpenWorker && "rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+            disabled={!onOpenWorker}
+            onClick={() => onOpenWorker?.(worker.actor)}
+          >
+            <WorkerIdentity actor={worker.actor} aliases={aliases} active={worker.active > 0} deleted={deleted} />
+          </button>
+          <CardDescription>{activitySummary}</CardDescription>
+          <CardAction>
+            <div className="flex items-center gap-1.5">
+              {deleted && <Badge variant="destructive">{t("Removed", "已移出团队")}</Badge>}
+              <WorkerActions
+                actor={worker.actor}
+                aliases={aliases}
+                aliasAvailable={aliasAvailable}
+                pending={pending}
+                canReset={canReset}
+                canDelete={canDelete}
+                onEditAlias={onEditAlias}
+                onReset={onReset}
+                onDelete={onDelete}
+                labels={{
+                  actions: t("Agent actions", "智能体操作"),
+                  alias: t("Edit display name", "编辑显示名称"),
+                  reset: t("Restart work statistics", "重新统计工作数据"),
+                  delete: t("Remove from team", "移出智能体团队"),
+                }}
+              />
+            </div>
+          </CardAction>
+        </CardHeader>
+
+        <CardContent className="flex flex-col gap-3">
+          <WorkerCapability identity={identity} identityAvailable={identityAvailable} identityModeEnabled={identityModeEnabled} />
+          <Separator />
+
+          <section className="flex flex-col gap-1.5" aria-label={t("Tasks in progress", "正在处理")}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium"><Gauge className="size-3.5 text-muted-foreground" />{t("In progress", "正在处理")}</span>
+              <Badge variant={worker.active > 0 ? "secondary" : "outline"}>{worker.active > 0 ? activeTaskLabel : t("No task in progress", "暂无处理中任务")}</Badge>
+            </div>
+            <Progress value={loadPercent} aria-label={worker.active > 0 ? activeTaskLabel : t("No task in progress", "暂无处理中任务")} />
+            <p className="text-[10px] text-muted-foreground">{t("This compares only active tasks; it does not show whether an agent is online.", "这里只比较正在处理的任务数量，不代表智能体是否在线。")}</p>
+          </section>
+
+          <dl className="grid grid-cols-3 gap-2">
+            <WorkerDatum icon={ListChecks} label={t("Delivered", "已交付")} value={String(completed)} />
+            <WorkerDatum icon={Clock3} label={t("Average completion time", "平均完成用时")} value={duration(worker.averageCycleSeconds ?? worker.average_cycle_seconds)} />
+            <WorkerDatum icon={RefreshCw} label={t("Returned tasks", "返工率")} value={percent(worker.reopenRate ?? worker.reopen_rate)} />
+          </dl>
+          <DeliveryPriorityBadges values={byPriority} />
+
+          <Separator />
+          <section className="flex flex-col gap-2" aria-label={t("Recent contributions", "最近参与")}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium"><History className="size-3.5 shrink-0 text-muted-foreground" />{t("Recent contributions", "最近参与")}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{lastActivity ? t("Last joined {when}", "上次参与 {when}", { when: timeAgo(lastActivity) }) : t("No activity yet", "暂时还没有")}</span>
+            </div>
+            <RecentWork items={recent} sourceScope={sourceScope} onOpenTask={onOpenTask} empty={t("Nothing new to show here yet", "最近还没有新动态")} />
+          </section>
+        </CardContent>
+      </Card>
+    </WorkerContextMenu>
+  );
+}
+
+function WorkerCapability({ identity, identityAvailable, identityModeEnabled }: {
+  identity?: CarbonWorkerIdentity;
+  identityAvailable: boolean;
+  identityModeEnabled: boolean;
+}) {
+  const { t } = useI18n();
+  if (!identityAvailable) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline">{t("Profile details unavailable", "身份信息暂不可用")}</Badge>
+        <span className="text-xs text-muted-foreground">{t("This project cannot read agent profile details right now.", "暂时无法读取此项目的智能体身份信息。")}</span>
+      </div>
+    );
+  }
+  if (!identityModeEnabled) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline">{t("Free collaboration", "自由协作")}</Badge>
+        <span className="text-xs text-muted-foreground">{t("This project has no fixed roles, so agents can take tasks as needed.", "这个项目没有固定身份分工，智能体可以按任务需要接手。")}</span>
+      </div>
+    );
+  }
+  if (!identity) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline">{t("Profile not set", "身份待设置")}</Badge>
+        <span className="text-xs text-muted-foreground">{t("This agent has not chosen a role or task types yet.", "这个智能体还没有选择角色或可接任务类型。")}</span>
+      </div>
+    );
+  }
+  return (
+    <section className="flex flex-col gap-1.5" aria-label={t("Role and task types", "角色与可接任务")}>
+      <span className="text-xs text-muted-foreground">{t("Role and task types", "角色与可接任务")}</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="secondary">{identity.role}</Badge>
+        {identity.types.map((type) => <Badge key={type} variant="outline">{carbonTaskTypeLabel(type, t)}</Badge>)}
+      </div>
+    </section>
+  );
+}
+
+function WorkerDatum({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg bg-muted/45 px-2.5 py-2">
+      <dt className="flex items-center gap-1 text-[10px] text-muted-foreground"><Icon className="size-3 shrink-0" />{label}</dt>
+      <dd className="mt-0.5 truncate text-sm font-semibold tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+function DeliveryPriorityBadges({ values }: { values?: Partial<Record<string, number>> }) {
+  const { t } = useI18n();
+  const entries = Object.entries(values ?? {}).filter(([, value]) => (value ?? 0) > 0).slice(0, 4);
+  if (!entries.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1" aria-label={t("Completed by priority", "按优先级完成")}>
+      <span className="mr-1 text-[10px] text-muted-foreground">{t("Priority", "优先级")}</span>
+      {entries.map(([priority, value]) => (
+        <Badge key={priority} variant="secondary" className={cn("carbon-label", labelTone(priority))}>{priorityLabel(priority)} {value}</Badge>
       ))}
     </div>
+  );
+}
+
+function WorkerConsoleSkeleton() {
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: 6 }, (_, index) => (
+        <Card key={index} size="sm">
+          <CardHeader>
+            <Skeleton className="h-7 w-40" />
+            <Skeleton className="h-3 w-52" />
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-2 w-full" />
+            <div className="grid grid-cols-3 gap-2"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div>
+            <Skeleton className="h-11 w-full" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function WorkerEmptyState({ filtered }: { filtered: boolean }) {
+  const { t } = useI18n();
+  return (
+    <Empty className="mt-3 min-h-64">
+      <EmptyHeader>
+        <EmptyMedia variant="icon"><UsersRound /></EmptyMedia>
+        <EmptyTitle>{filtered ? t("No matching agents", "没有匹配的智能体") : t("No agent has worked on a task here yet", "还没有智能体参与任务")}</EmptyTitle>
+        <EmptyDescription>
+          {filtered
+            ? t("Try an agent name, role, or task type.", "换个智能体名称、角色或任务类型试试。")
+            : t("Agents will appear here after they take part in a task.", "有智能体开始参与任务后，这里会自动显示。")}
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
 
@@ -636,7 +874,7 @@ function RecentWork({
 }) {
   if (!items.length) return <span className="text-xs text-muted-foreground">{empty}</span>;
   return (
-    <div className="space-y-0.5">
+    <div className="flex flex-col gap-1">
       {items.slice(0, 2).map((item) => {
         const taskTarget = recentWorkTaskNavigationTarget(item, sourceScope);
         return (
@@ -645,11 +883,11 @@ function RecentWork({
             type="button"
             disabled={!onOpenTask || !taskTarget}
             onClick={() => taskTarget && onOpenTask?.(taskTarget)}
-            className={cn("flex max-w-full items-center gap-1.5 text-left text-xs", onOpenTask && taskTarget && "hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+            className={cn("flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-left text-xs", onOpenTask && taskTarget && "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
           >
             <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{item.taskId}</span>
             <span className="truncate">{item.title}</span>
-            <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(item.at)}</span>
+            <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{timeAgo(item.at)}</span>
           </button>
         );
       })}
@@ -686,17 +924,21 @@ function WorkerActions({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-xs" aria-label={labels.actions} disabled={pending}>
-          <MoreHorizontal />
+          <MoreHorizontal data-icon="inline-start" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuLabel className="truncate font-mono text-[10px]">{formatWorkerActor(actor, aliases)}</DropdownMenuLabel>
-        {aliasAvailable && <DropdownMenuItem onSelect={onEditAlias}><Pencil />{labels.alias}</DropdownMenuItem>}
+        <DropdownMenuGroup>
+          {aliasAvailable && <DropdownMenuItem onSelect={onEditAlias}><Pencil />{labels.alias}</DropdownMenuItem>}
+        </DropdownMenuGroup>
         {canManageLifecycle && (
           <>
             {aliasAvailable && <DropdownMenuSeparator />}
-            {canReset && <DropdownMenuItem onSelect={onReset}><RotateCcw />{labels.reset}</DropdownMenuItem>}
-            {canDelete && <DropdownMenuItem variant="destructive" onSelect={onDelete}><UserRoundX />{labels.delete}</DropdownMenuItem>}
+            <DropdownMenuGroup>
+              {canReset && <DropdownMenuItem onSelect={onReset}><RotateCcw />{labels.reset}</DropdownMenuItem>}
+              {canDelete && <DropdownMenuItem variant="destructive" onSelect={onDelete}><UserRoundX />{labels.delete}</DropdownMenuItem>}
+            </DropdownMenuGroup>
           </>
         )}
       </DropdownMenuContent>
@@ -723,20 +965,17 @@ function WorkerLifecycleDialog({
 }) {
   const { t } = useI18n();
   const isDelete = state?.kind === "delete";
-  const title = isDelete ? t("Delete Worker?", "删除 Worker？") : t("Reset Worker metrics?", "重置 Worker 指标？");
+  const title = isDelete ? t("Remove this agent from the team?", "将此智能体移出团队？") : t("Restart this agent's work statistics?", "重新统计此智能体的工作数据？");
   const firstDescription = isDelete
     ? t(
-      "This does not change task files, assignments, leases, provenance, or Work Logs. It only removes this Worker's display alias and stores a lifecycle tombstone. New activity automatically recreates the Worker.",
-      "这不会改动任务文件、分配、租约、溯源记录或 Work Logs。它只会移除此 Worker 的显示别名并写入生命周期墓碑；新的活动会自动重建该 Worker。",
+      "Tasks, task leads, work logs, and history stay intact. This only removes the agent from the team view and clears its display name. If the same connection works again, it will appear again automatically.",
+      "不会删除任务、负责人、工作日志或历史记录。它只会将该智能体从团队列表中移除并清除显示名称；同一连接标识再次产生工作记录时，会自动重新出现。",
     )
     : t(
-      "This does not change task files, assignments, leases, provenance, or Work Logs. It only starts derived Worker metrics from this moment forward.",
-      "这不会改动任务文件、分配、租约、溯源记录或 Work Logs。它只会从此刻开始重新计算派生 Worker 指标。",
+      "Tasks, task leads, work logs, and history stay unchanged. Only this agent's work statistics start fresh from now on.",
+      "任务、负责人、工作日志和历史记录都不会改变；只会从此刻开始重新统计该智能体的工作数据。",
     );
-  const secondDescription = t(
-    "Type the canonical actor exactly to make this change.",
-    "请准确输入 canonical actor 以确认此操作。",
-  );
+  const secondDescription = t("To confirm, type the connection ID exactly.", "请输入完整连接标识以确认此操作。");
 
   return (
     <AlertDialog open={state !== null} onOpenChange={(open) => !open && onClose()}>
@@ -746,10 +985,12 @@ function WorkerLifecycleDialog({
           <AlertDialogDescription>{state?.stage === 1 ? firstDescription : secondDescription}</AlertDialogDescription>
         </AlertDialogHeader>
         {state?.stage === 2 && (
-          <label className="grid gap-1.5 text-sm">
-            <span className="text-muted-foreground">{t("Canonical actor", "Canonical actor")}</span>
-            <Input autoFocus value={confirmationText} onChange={(event) => onConfirmationTextChange(event.target.value)} placeholder={state.actor} />
-          </label>
+          <FieldGroup className="gap-3">
+            <Field>
+              <FieldLabel htmlFor="worker-lifecycle-confirmation">{t("Connection ID", "连接标识")}</FieldLabel>
+              <Input id="worker-lifecycle-confirmation" autoFocus value={confirmationText} onChange={(event) => onConfirmationTextChange(event.target.value)} placeholder={state.actor} />
+            </Field>
+          </FieldGroup>
         )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("Cancel", "取消")}</AlertDialogCancel>
@@ -757,7 +998,7 @@ function WorkerLifecycleDialog({
             <Button variant={isDelete ? "destructive" : "default"} onClick={onContinue}>{t("Continue", "继续")}</Button>
           ) : (
             <Button variant={isDelete ? "destructive" : "default"} disabled={pending || confirmationText !== state?.actor} onClick={onConfirm}>
-              {isDelete ? t("Delete Worker", "删除 Worker") : t("Reset metrics", "重置指标")}
+              {isDelete ? t("Remove from team", "移出智能体团队") : t("Restart statistics", "重新统计")}
             </Button>
           )}
         </AlertDialogFooter>

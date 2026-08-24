@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-focus-main-task"
+description = "Enables the focus_main_task command without any pre-configured scope."
+commands.allow = ["focus_main_task"]
+
+[[permission]]
+identifier = "deny-focus-main-task"
+description = "Denies the focus_main_task command without any pre-configured scope."
+commands.deny = ["focus_main_task"]

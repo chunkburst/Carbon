@@ -163,6 +163,45 @@ func TestHomeHubRefCountedTeardownAndNeverInitializesTaskStorage(t *testing.T) {
 	}
 }
 
+func TestHomeHubFinalUnsubscribeJoinsWatcherGoroutines(t *testing.T) {
+	root := t.TempDir()
+	if _, err := home.Ensure(root); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHomeHub(10 * time.Millisecond)
+	_, cancel, err := hub.Subscribe(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hub.mu.Lock()
+	rw := hub.roots[root]
+	hub.mu.Unlock()
+	if rw == nil {
+		t.Fatal("subscription did not install a Home watcher")
+	}
+
+	cancel()
+	if got := hub.activeRoots(); got != 0 {
+		t.Fatalf("activeRoots after final cancel = %d, want 0", got)
+	}
+
+	joined := make(chan struct{})
+	go func() {
+		rw.wg.Wait()
+		close(joined)
+	}()
+	select {
+	case <-joined:
+	case <-time.After(time.Second):
+		t.Fatal("final cancel returned before Home watcher goroutines stopped")
+	}
+
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("remove watched Home TempDir after final cancel: %v", err)
+	}
+}
+
 func openHomeEventStream(t *testing.T, serverURL, root string) (*http.Response, *bufio.Reader) {
 	t.Helper()
 	query := url.Values{}

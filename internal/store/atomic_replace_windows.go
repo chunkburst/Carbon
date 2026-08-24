@@ -32,11 +32,6 @@ func atomicReplace(from, to string) error {
 	return windows.MoveFileEx(fromPtr, toPtr, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
 
-// MoveFileEx cannot reliably replace an open staging file on Windows, so the descriptor
-// must be closed before publication. The Windows identity check uses the native file ID
-// after reopening with OPEN_REPARSE_POINT.
-func atomicTempRequiresCloseBeforeReplace() bool { return true }
-
 // atomicWindowsPath mirrors the relevant part of os.Rename's long-path handling before
 // calling MoveFileEx directly. Keeping that support matters for deeply nested portable
 // data homes, while the extended prefix remains a path representation change only.

@@ -291,6 +291,113 @@ func TestWorkLogServiceListFiltersAcrossHome(t *testing.T) {
 	}
 }
 
+func TestIdentityDraftsShareOnlyWithinTheirProjectAndStayAppendOnly(t *testing.T) {
+	fixture := newWorkLogFixture(t)
+	cfg, err := fixture.store1.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.IdentityMode = true
+	if err := fixture.store1.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	owner := fixture.service(t, "agent:owner", fixture.cluster1, fixture.project1.ID)
+	legacyOwner := fixture.service(t, "agent:legacy", fixture.cluster1, fixture.project1.ID)
+	peerSameProject := fixture.service(t, "agent:peer", fixture.cluster1, fixture.project1.ID)
+	bystanderSameProject := fixture.service(t, "agent:bystander", fixture.cluster1, fixture.project1.ID)
+	peerOtherProject := fixture.service(t, "agent:peer", fixture.cluster1, fixture.project2.ID)
+	systemSameProject := fixture.service(t, "system:auditor", fixture.cluster1, fixture.project1.ID)
+
+	normalPrivate, err := owner.CreateWorkLog(context.Background(), workLogDraft(worklog.WorkerPrivate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This record represents a historical generic private log whose author happened
+	// to choose the future display tag. It must never acquire peer visibility merely
+	// because the Identity Mode feature is later enabled.
+	legacyTagged, err := worklog.New(fixture.store1, nil).Create(context.Background(), "agent:legacy", worklog.Log{
+		Worker: "agent:legacy", Visibility: worklog.WorkerPrivate, ClusterID: fixture.cluster1.ID,
+		ProjectID: fixture.project1.ID, Title: "old private tag", Tags: []string{identityDraftTag},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := owner.CreateIdentityDraft(context.Background(), IdentityDraftInput{
+		Title: "请评审接口", Body: "先看错误契约。", Recipients: []string{"agent:peer"}, Thread: "identity-flow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Visibility != worklog.WorkerPrivate || draft.ProjectID != fixture.project1.ID ||
+		draft.Coordination == nil || draft.Coordination.Version != worklog.CoordinationVersion ||
+		!containsString(draft.Coordination.Recipients, "agent:peer") || draft.Coordination.Thread != "identity-flow" ||
+		!containsString(draft.Tags, identityDraftTag) || !containsString(draft.Tags, "to:agent:peer") || !containsString(draft.Tags, "thread:identity-flow") {
+		t.Fatalf("identity draft shape = %#v", draft)
+	}
+	if _, err := peerSameProject.GetWorkLog(normalPrivate.ID); !errors.Is(err, ErrWorkLogNotVisible) {
+		t.Fatalf("ordinary private leaked to peer: %v", err)
+	}
+	if _, err := peerSameProject.GetWorkLog(legacyTagged.ID); !errors.Is(err, ErrWorkLogNotVisible) {
+		t.Fatalf("historical tagged private leaked to peer: %v", err)
+	}
+	if got, err := peerSameProject.GetWorkLog(draft.ID); err != nil || got.ID != draft.ID {
+		t.Fatalf("same-project peer draft get = %#v err=%v", got, err)
+	}
+	if _, err := bystanderSameProject.GetWorkLog(draft.ID); !errors.Is(err, ErrWorkLogNotVisible) {
+		t.Fatalf("unlisted same-project bystander read = %v, want private", err)
+	}
+	if got, err := systemSameProject.GetWorkLog(draft.ID); err != nil || got.ID != draft.ID {
+		t.Fatalf("system manager draft get = %#v err=%v", got, err)
+	}
+	if listed, err := peerSameProject.ListWorkLogs(worklog.Filter{Limit: 20}); err != nil || !containsWorkLog(listed, draft.ID) || containsWorkLog(listed, normalPrivate.ID) || containsWorkLog(listed, legacyTagged.ID) {
+		t.Fatalf("same-project peer draft list = %#v err=%v", listed, err)
+	}
+	if listed, err := bystanderSameProject.ListWorkLogs(worklog.Filter{Limit: 20}); err != nil || containsWorkLog(listed, draft.ID) {
+		t.Fatalf("unlisted same-project bystander list = %#v err=%v", listed, err)
+	}
+	if _, err := peerOtherProject.GetWorkLog(draft.ID); !errors.Is(err, ErrWorkLogNotVisible) {
+		t.Fatalf("foreign-project draft get = %v, want private", err)
+	}
+	if _, err := owner.PatchWorkLog(context.Background(), draft.ID, WorkLogPatch{Body: stringPointer("rewrite")}, draft.ETag()); !errors.Is(err, ErrIdentityDraftImmutable) {
+		t.Fatalf("owner draft update = %v, want append-only", err)
+	}
+	if err := peerSameProject.DeleteWorkLog(context.Background(), draft.ID, draft.ETag()); !errors.Is(err, ErrIdentityDraftImmutable) {
+		t.Fatalf("peer draft delete = %v, want append-only", err)
+	}
+	if _, err := owner.CreateWorkLog(context.Background(), worklog.Log{Visibility: worklog.WorkerPrivate, Title: "forged draft", Tags: []string{identityDraftTag}}); !errors.Is(err, ErrIdentityDraftReservedTag) {
+		t.Fatalf("ordinary create accepted reserved tag: %v", err)
+	}
+	if _, err := owner.CreateWorkLog(context.Background(), worklog.Log{Visibility: worklog.WorkerPrivate, Title: "forged envelope", Coordination: &worklog.Coordination{Version: worklog.CoordinationVersion}}); !errors.Is(err, ErrIdentityDraftServerOwned) {
+		t.Fatalf("ordinary create accepted coordination envelope: %v", err)
+	}
+	forgedUpdate := normalPrivate
+	forgedUpdate.Coordination = &worklog.Coordination{Version: worklog.CoordinationVersion}
+	if _, err := owner.UpdateWorkLog(context.Background(), forgedUpdate, normalPrivate.ETag()); !errors.Is(err, ErrIdentityDraftServerOwned) {
+		t.Fatalf("ordinary update accepted coordination envelope: %v", err)
+	}
+	if _, err := legacyOwner.PatchWorkLog(context.Background(), legacyTagged.ID, WorkLogPatch{Title: stringPointer("old tag remains editable")}, legacyTagged.ETag()); err != nil {
+		t.Fatalf("historical tag lost normal edit behavior: %v", err)
+	}
+	broadcast, err := owner.CreateIdentityDraft(context.Background(), IdentityDraftInput{Title: "项目广播"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := bystanderSameProject.GetWorkLog(broadcast.ID); err != nil || got.ID != broadcast.ID {
+		t.Fatalf("empty-recipient broadcast = %#v err=%v", got, err)
+	}
+
+	cfg.IdentityMode = false
+	if err := fixture.store1.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := peerSameProject.GetWorkLog(draft.ID); !errors.Is(err, ErrWorkLogNotVisible) {
+		t.Fatalf("disabled identity mode still shared draft: %v", err)
+	}
+	if _, err := owner.CreateIdentityDraft(context.Background(), IdentityDraftInput{Title: "disabled"}); !errors.Is(err, ErrIdentityModeDisabled) {
+		t.Fatalf("draft send while disabled = %v", err)
+	}
+}
+
 func TestStandaloneWorkLogsStayPrivateAndAreDiscoveredAsGlobalFromCluster(t *testing.T) {
 	homeRoot := t.TempDir()
 	if _, err := home.Ensure(homeRoot); err != nil {
@@ -381,7 +488,7 @@ func TestRegisterWorkLogToolsExposesCRUDAndRequiresVersions(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete"} {
+	for _, name := range []string{"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete", "worklog_draft_send"} {
 		if !names[name] {
 			t.Errorf("worklog tool %q is not registered: %v", name, names)
 		}
@@ -418,13 +525,13 @@ func TestRegisterWorkLogToolsExposesCRUDAndRequiresVersions(t *testing.T) {
 func TestNewServerRegistersWorkLogToolsOnlyForStableCarbonV2(t *testing.T) {
 	fixture := newWorkLogFixture(t)
 	carbonNames := listedWorkLogToolNames(t, NewServer(fixture.service(t, "agent:owner", fixture.cluster1, fixture.project1.ID)))
-	for _, name := range []string{"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete"} {
+	for _, name := range []string{"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete", "worklog_draft_send"} {
 		if !carbonNames[name] {
 			t.Errorf("Carbon stable v2 tool catalog omitted %q: %v", name, carbonNames)
 		}
 	}
 	legacyNames := listedWorkLogToolNames(t, NewServer(NewService(store.New(t.TempDir()), "agent:legacy", nil)))
-	for _, name := range []string{"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete"} {
+	for _, name := range []string{"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete", "worklog_draft_send"} {
 		if legacyNames[name] {
 			t.Errorf("legacy tool catalog exposed %q: %v", name, legacyNames)
 		}
@@ -466,6 +573,15 @@ func listedWorkLogToolNames(t *testing.T, srv *mcpsdk.Server) map[string]bool {
 func containsWorkLog(items []worklog.Log, id string) bool {
 	for _, item := range items {
 		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
 			return true
 		}
 	}

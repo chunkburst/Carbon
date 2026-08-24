@@ -162,12 +162,19 @@ These routes require a resolved standalone-project, cluster, or cluster-project 
 | Sessions | Task session-begin/list routes and `/api/sessions` read/heartbeat/finish/cancel routes |
 | Leases | `/api/tasks/{id}/lease/claim`, `renew`, `release`, `reassign`, and approval routes |
 | Recovery/planning | Trash, bulk update/move, views, templates, Evidence/blocker, and statistics routes |
-| Work Logs | `GET/POST /api/worklogs`, `GET/PUT/DELETE /api/worklogs/{id}` in an explicit cluster scope |
+| Work Logs | `GET/POST /api/worklogs`, `GET/PUT/DELETE /api/worklogs/{id}` in an explicit standalone-project or cluster store scope |
+| Worker identities | `GET /api/worker-identities`, `GET/PUT /api/worker-identities/{actor}` in an explicit project store scope |
+| Store configuration | `GET/POST /api/config`; `identityMode` is false unless explicitly enabled |
 | Backups | `/api/backup/*` Home-only backup configuration, snapshot, verification, upload, and restore-plan routes |
 
 Request/response documents use JSON and stable IDs. Operations marked version-protected require the
 current raw version or quoted ETag in `expectedVersion`/`expected_version` according to their route
 or MCP adapter; a stale writer receives a conflict instead of overwriting later data.
+
+Worker identity records contain `actor`, `role`, `types`, `claimedAt`, `updatedAt`, `changedBy`, and
+the most recent change `reason`. An Agent may update only its own record; a local human actor may
+manage an Agent record. A later change requires a reason. Each task retains one scalar `type`, while
+an identity may list several types.
 
 ## Events and Streamable HTTP MCP
 

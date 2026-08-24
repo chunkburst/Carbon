@@ -35,7 +35,7 @@ func (svc *Service) ClaimLease(ctx context.Context, input LeaseClaimInput) (leas
 	if _, err := svc.writableTask(input.TaskID); err != nil {
 		return lease.ClaimResult{}, err
 	}
-	return lease.New(svc.store, svc.now, 0).Claim(ctx, lease.ClaimInput{
+	return svc.leaseManager().Claim(ctx, lease.ClaimInput{
 		TaskID: input.TaskID, Actor: svc.actor, TTL: input.TTL, RequestID: input.RequestID,
 		Reason: input.Reason, ExpectedVersion: input.ExpectedVersion,
 	})
@@ -72,7 +72,7 @@ func (svc *Service) ReassignLease(ctx context.Context, taskID, assignee, reason,
 	if _, err := svc.writableTask(taskID); err != nil {
 		return nil, err
 	}
-	return lease.New(svc.store, svc.now, 0).Reassign(ctx, lease.ReassignInput{
+	return svc.leaseManager().Reassign(ctx, lease.ReassignInput{
 		TaskID: taskID, Actor: svc.actor, Assignee: assignee, Force: force,
 		Reason: reason, ExpectedVersion: expectedVersion,
 	})
@@ -82,7 +82,7 @@ func (svc *Service) ApproveLeaseClaim(ctx context.Context, taskID, requestID, re
 	if _, err := svc.writableTask(taskID); err != nil {
 		return nil, err
 	}
-	return lease.New(svc.store, svc.now, 0).Approve(ctx, lease.ApproveInput{
+	return svc.leaseManager().Approve(ctx, lease.ApproveInput{
 		TaskID: taskID, Approver: svc.actor, RequestID: requestID, Approve: approve,
 		Reason: reason, ExpectedVersion: expectedVersion,
 	})

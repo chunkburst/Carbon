@@ -92,6 +92,7 @@ import {
 } from "@/lib/queries";
 import { cn, initials, statusLabel, timeAgo } from "@/lib/utils";
 import { type Translate, useI18n } from "@/lib/i18n";
+import { activityAction, activityBadgeClass, isActivityNote } from "@/lib/activity";
 import type { ChangedFile, Check, GitCommit as GitCommitData, Run, SessionGitContext, Status, Task } from "@/lib/api";
 
 const DETAIL_LAYOUT_ID = "carbon-detail-layout";
@@ -284,20 +285,19 @@ export function TaskDetail({
         <AlertDialog open={confirmClaim} onOpenChange={setClaimDialogOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>{t("Claim this task?", "确认认领此任务？")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {claimChecking
-                  ? t("Checking the available ownership safeguards…", "正在检查可用的负责人保护机制…")
-                  : leaseSupported
-                    ? t(
-                        "This submits a lease request for {actor} with an optimistic version lock.",
-                        "这会为 {actor} 提交带乐观版本锁的租约申请。",
+                <AlertDialogTitle>{t("Take over this task?", "确认接手此任务？")}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {claimChecking
+                    ? t("Checking the task's current state…", "正在检查任务当前状态…")
+                    : leaseSupported
+                      ? t(
+                        "This asks to hand the task to {actor}. If someone else is responsible now, they will confirm the handoff first.",
+                        "这会请求将任务交给 {actor}。如果目前已有负责人，对方需要先确认交接。",
                         { actor },
                       )
-                    : t(
-                        "This assigns {actor} as the task owner immediately.",
-                        "确认后会立即将 {actor} 设置为该任务的负责人。",
-                        { actor },
+                      : t(
+                        "This Carbon project needs an update before the task can be taken over.",
+                        "当前 Carbon 项目需要更新后，才能接手此任务。",
                       )}
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -305,7 +305,7 @@ export function TaskDetail({
               <p className="font-medium">{task.title}</p>
               <p className="mt-1 font-mono text-xs text-muted-foreground">{task.id}</p>
               <p className="mt-2 text-muted-foreground">
-                {t("Actor: {actor}", "认领人：{actor}", { actor })}
+                {t("Taking over: {actor}", "接手人：{actor}", { actor })}
               </p>
             </div>
             {leaseSupported ? (
@@ -313,13 +313,13 @@ export function TaskDetail({
                 <FieldGroup className="gap-3">
                   <Field>
                     <FieldLabel htmlFor={`claim-reason-${task.id}`}>
-                      {t("Ownership reason", "认领原因")}
+                      {t("Why take this task?", "接手说明")}
                     </FieldLabel>
                     <Input
                       id={`claim-reason-${task.id}`}
                       value={claimReason}
                       onChange={(event) => setClaimReason(event.target.value)}
-                      placeholder={t("Why are you claiming this task?", "说明为什么要认领此任务")}
+                      placeholder={t("What will you take care of?", "说明接手后会负责什么")}
                     />
                   </Field>
                 </FieldGroup>
@@ -328,15 +328,15 @@ export function TaskDetail({
                     <RefreshCw />
                     <AlertDescription>
                       {t(
-                        "This task has no current version. Refresh the task before requesting a lease so the optimistic lock can be enforced.",
-                        "此任务缺少当前版本号。请先刷新任务，再申请租约，以确保乐观锁生效。",
+                        "This task changed or did not load completely. Refresh it before taking it over.",
+                        "此任务刚刚变更或未完整加载。请先刷新，再接手。",
                       )}
                     </AlertDescription>
                   </Alert>
                 )}
               </>
-            ) : <Alert><AlertDescription>{t("Direct legacy claiming is disabled because it cannot enforce a reason and optimistic version lock. Migrate this task to Carbon before claiming it.", "旧版直接认领无法强制记录原因和乐观版本锁，因此已禁用。请先将此任务迁移到 Carbon 再认领。")}</AlertDescription></Alert>}
-            {claimAwaitingApproval && <Alert><AlertDescription>{t("This lease request is waiting for the current owner to approve it.", "此租约申请正在等待当前负责人审批。")}</AlertDescription></Alert>}
+            ) : <Alert><AlertDescription>{t("This task needs the current Carbon handoff flow before it can be taken over.", "此任务需要使用当前 Carbon 交接流程后，才能接手。")}</AlertDescription></Alert>}
+            {claimAwaitingApproval && <Alert><AlertDescription>{t("Waiting for the current task lead to confirm the handoff.", "正在等待当前负责人确认交接。")}</AlertDescription></Alert>}
             <AlertDialogFooter>
               <AlertDialogCancel disabled={claimPending}>{t("Cancel", "取消")}</AlertDialogCancel>
               <Button
@@ -347,10 +347,10 @@ export function TaskDetail({
                 {claimChecking
                   ? t("Checking…", "正在检查…")
                   : claimAwaitingApproval
-                    ? t("Awaiting approval", "等待审批")
+                      ? t("Waiting for confirmation", "等待确认")
                   : claimPending
-                    ? t("Claiming…", "正在认领…")
-                    : t("Request lease", "申请租约")}
+                      ? t("Requesting takeover…", "正在请求接手…")
+                      : t("Request takeover", "请求接手")}
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -427,7 +427,7 @@ export function TaskDetail({
 
               {/* Activity */}
               <section className="mt-10">
-                <h2 className="text-xs font-medium text-muted-foreground">
+                <h2 className="text-sm font-medium text-muted-foreground">
                   {t("Activity", "动态")}
                 </h2>
                 <ol className="mt-3 space-y-3.5">
@@ -522,11 +522,11 @@ export function TaskDetail({
                   variant="outline"
                   className="w-full justify-start"
                   disabled={claimPending || claimChecking || !leaseSupported}
-                  title={!claimChecking && !leaseSupported ? t("Safe claiming requires the Carbon lease workflow", "安全认领需要 Carbon 租约流程") : undefined}
+                  title={!claimChecking && !leaseSupported ? t("Taking over a task needs the current Carbon workflow", "接手任务需要当前 Carbon 工作流程") : undefined}
                   onClick={() => setClaimDialogOpen(true)}
                 >
                   {leaseClaim.isPending ? <Loader2 className="animate-spin" /> : <UserPlus />}
-                  {t("Claim", "认领")}
+                  {t("Take over", "接手")}
                 </Button>
               )}
             </Prop>
@@ -1384,7 +1384,8 @@ function ActivityEntry({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const note = entry.text?.trim();
   const preview = note ? (note.split("\n").find((l) => l.trim()) ?? "") : "";
-  const isNote = entry.did === "note";
+  const action = activityAction(entry.did, t);
+  const isNote = isActivityNote(entry.did);
 
   const startEdit = () => {
     setDraft(entry.text ?? "");
@@ -1429,10 +1430,16 @@ function ActivityEntry({
           onClick={note && !editing ? () => setOpen((o) => !o) : undefined}
         >
           <span className="shrink-0 text-sm font-medium">{entry.who}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">{entry.did}</span>
+          <Badge
+            variant="outline"
+            title={action.label}
+            className={cn("h-6 max-w-56 truncate px-2 text-xs font-medium", activityBadgeClass(action.tone))}
+          >
+            {action.label}
+          </Badge>
           {entry.editedAt && <span className="shrink-0 text-xs text-muted-foreground/70">{t("(edited)", "（已编辑）")}</span>}
           {note && !open && (
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/80">{preview}</span>
+            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground/80">{preview}</span>
           )}
           {isNote && !editing && (
             <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">

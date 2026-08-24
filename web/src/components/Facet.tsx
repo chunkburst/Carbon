@@ -1,6 +1,7 @@
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -31,8 +32,10 @@ export function Facet({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="any">{placeholder}</SelectItem>
-        {children}
+        <SelectGroup>
+          <SelectItem value="any">{placeholder}</SelectItem>
+          {children}
+        </SelectGroup>
       </SelectContent>
     </Select>
   );

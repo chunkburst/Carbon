@@ -1,6 +1,5 @@
 import type { MouseEvent, ReactNode } from "react";
 import {
-  Activity,
   Check,
   FilePlus2,
   KanbanSquare,
@@ -49,9 +48,8 @@ const VIEW_ITEMS: Array<{
 }> = [
   { id: "board", label: ["Board", "看板"], icon: KanbanSquare },
   { id: "graph", label: ["Dependency graph", "依赖图"], icon: Network },
-  { id: "workers", label: ["Workers", "工作者"], icon: UsersRound },
+  { id: "workers", label: ["Agent team", "智能体团队"], icon: UsersRound },
   { id: "work-logs", label: ["Work Logs", "工作日志"], icon: ListChecks },
-  { id: "owner-logs", label: ["Owner Logs", "所有者日志"], icon: Activity },
   { id: "trash", label: ["Trash", "回收站"], icon: Trash2 },
 ];
 

@@ -321,6 +321,72 @@ func TestUpdateTitleBodyChecks(t *testing.T) {
 	}
 }
 
+func TestBlockerStateChangesHaveDedicatedProvenance(t *testing.T) {
+	svc := service(t, "agent:writer")
+	created, err := svc.Create(store.Draft{Title: "blocked work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reason := "waiting for credentials"
+	blocked, err := svc.SetBlockerWithVersion(created.Task.ID, reason, created.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocked.Provenance) != len(created.Provenance)+1 {
+		t.Fatalf("blocker state switch added unexpected provenance: %d -> %d", len(created.Provenance), len(blocked.Provenance))
+	}
+	entry := blocked.Provenance[len(blocked.Provenance)-1]
+	if entry.Did != "blocked" || entry.Text != reason {
+		t.Fatalf("blocked provenance = %+v", entry)
+	}
+
+	updatedReason := "waiting for deployment window"
+	updated, err := svc.UpdateWithVersion(created.Task.ID, UpdateFields{BlockerReason: &updatedReason}, blocked.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Provenance) != len(blocked.Provenance)+1 || updated.Provenance[len(updated.Provenance)-1].Did != "updated" {
+		t.Fatalf("non-empty blocker rewrite should remain an update: %+v", updated.Provenance)
+	}
+
+	clear := ""
+	unblocked, err := svc.SetBlockerWithVersion(created.Task.ID, clear, updated.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unblocked.Provenance) != len(updated.Provenance)+1 {
+		t.Fatalf("unblock state switch added unexpected provenance: %d -> %d", len(updated.Provenance), len(unblocked.Provenance))
+	}
+	entry = unblocked.Provenance[len(unblocked.Provenance)-1]
+	if entry.Did != "unblocked" || entry.Text != "" {
+		t.Fatalf("unblocked provenance = %+v", entry)
+	}
+
+	reblocked, err := svc.SetBlockerWithVersion(created.Task.ID, "waiting for review", unblocked.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	newTitle := "blocked work, revised"
+	combined, err := svc.UpdateWithVersion(created.Task.ID, UpdateFields{
+		BlockerReason: &clear,
+		Title:         &newTitle,
+	}, reblocked.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if combined.Task.Title != newTitle || combined.Task.BlockerReason != "" {
+		t.Fatalf("combined update not applied: %+v", combined.Task)
+	}
+	if len(combined.Provenance) != len(reblocked.Provenance)+2 {
+		t.Fatalf("combined blocker/update provenance = %d, want %d", len(combined.Provenance), len(reblocked.Provenance)+2)
+	}
+	last := combined.Provenance[len(combined.Provenance)-2:]
+	if last[0].Did != "unblocked" || last[1].Did != "updated" {
+		t.Fatalf("combined blocker/update provenance = %+v", last)
+	}
+}
+
 func TestBlockerAndEvidenceAreVersionProtectedAndAudited(t *testing.T) {
 	svc := service(t, "agent:writer")
 	created, err := svc.Create(store.Draft{

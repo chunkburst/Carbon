@@ -34,8 +34,8 @@ export function visibilityDetail(visibility: WorkLogVisibility, t: (en: string, 
   switch (visibility) {
     case "worker_private":
       return {
-        label: t("Worker private", "Worker 私有"),
-        description: t("Hidden from other Workers; the owning Worker and local administrator can inspect it.", "对其他 Worker 隐藏；所属 Worker 与本地管理员可以查看。"),
+        label: t("Agent only", "仅相关智能体"),
+        description: t("Only the recording agent and local administrator can view this entry.", "仅记录该日志的智能体和本机管理员可以查看。"),
       };
     case "project_public":
       return {
@@ -44,8 +44,8 @@ export function visibilityDetail(visibility: WorkLogVisibility, t: (en: string, 
       };
     default:
       return {
-        label: t("Global", "全局"),
-        description: t("Visible across project clusters in the current Carbon Home.", "在当前 Carbon Home 内可跨项目集群查看。"),
+        label: t("All projects", "全部项目"),
+        description: t("Visible across projects in the current Carbon workspace.", "在当前 Carbon 工作区的多个项目中可见。"),
       };
   }
 }

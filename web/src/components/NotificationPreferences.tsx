@@ -103,7 +103,7 @@ export function NotificationPreferences({ open, scope }: { open: boolean; scope?
         <ToggleRow label={t("Ready", "就绪")} checked={preferences.events.ready} onChange={(ready) => update({ events: { ...preferences.events, ready } })} />
         <ToggleRow label={t("Awaiting review", "等待审核")} checked={preferences.events.review} onChange={(review) => update({ events: { ...preferences.events, review } })} />
         <ToggleRow label={t("Check failed", "检查失败")} checked={preferences.events.check_failed} onChange={(check_failed) => update({ events: { ...preferences.events, check_failed } })} />
-        <ToggleRow label={t("Lease expiring", "租约即将到期")} checked={preferences.events.lease_expiring} onChange={(lease_expiring) => update({ events: { ...preferences.events, lease_expiring } })} />
+        <ToggleRow label={t("Handoff window expiring", "接手期限即将到期")} checked={preferences.events.lease_expiring} onChange={(lease_expiring) => update({ events: { ...preferences.events, lease_expiring } })} />
         <ToggleRow label={t("Do not disturb", "免打扰")} checked={preferences.doNotDisturb} onChange={(doNotDisturb) => update({ doNotDisturb })} />
       </div>
       <div className="mt-4 flex flex-col gap-2">

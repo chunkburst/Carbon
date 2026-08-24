@@ -69,7 +69,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { isTauri, pickFolder } from "@/lib/tauri";
 
-type ProjectSelection = { clusterId?: string; projectId: string };
+export type ProjectSelection = { clusterId?: string; projectId: string };
 
 function matchesSearch(value: string | undefined, query: string): boolean {
   return value?.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) ?? false;
@@ -371,7 +371,7 @@ function ClusterEditorDialog({
         ? await update.mutateAsync({ clusterId: cluster.id, name: name.trim(), slug: slug.trim(), description: description.trim() })
         : await create.mutateAsync({ name: name.trim(), slug: slug.trim() || undefined, description: description.trim() || undefined });
       if (!result.available) {
-        setError(t("This Carbon sidecar cannot save clusters.", "此 Carbon 本地服务无法保存项目集群。"));
+        setError(t("This Carbon version cannot save clusters. Update Carbon and try again.", "当前 Carbon 版本暂不支持保存项目集群，请更新后重试。"));
         return;
       }
       if (cluster && onSetIcon && !catalogIconsEqual(selectedIcon, initialIcon)) {
@@ -432,7 +432,7 @@ function ClusterEditorDialog({
   );
 }
 
-function ProjectEditorDialog({
+export function ProjectEditorDialog({
   open,
   onOpenChange,
   home,
@@ -531,7 +531,7 @@ function ProjectEditorDialog({
         name: clearTaskDataName,
       });
       if (!result.available) {
-        setClearTaskDataError(t("This Carbon sidecar cannot clear project task data.", "此 Carbon sidecar 不支持清空项目任务数据。"));
+        setClearTaskDataError(t("This Carbon version cannot clear project task data. Update Carbon and try again.", "当前 Carbon 版本暂不支持清空项目任务数据，请更新后重试。"));
         return;
       }
       setClearTaskDataStage(null);
@@ -563,7 +563,7 @@ function ProjectEditorDialog({
         deleteData: deleteProjectData,
       });
       if (!result.available) {
-        setDeleteProjectError(t("This Carbon sidecar cannot delete projects.", "此 Carbon 本地服务不支持删除项目。"));
+        setDeleteProjectError(t("This Carbon version cannot delete projects. Update Carbon and try again.", "当前 Carbon 版本暂不支持删除项目，请更新后重试。"));
         return;
       }
       closeProjectDelete();
@@ -592,12 +592,12 @@ function ProjectEditorDialog({
         }
         if (imageIntent.kind === "upload") {
           const result = await uploadAsset.mutateAsync({ target: "project", id: target.id, file: imageIntent.file });
-          if (!result.available) throw new Error(t("Project image upload needs a newer Carbon sidecar.", "项目图片上传需要更新的 Carbon 本地服务。"));
+          if (!result.available) throw new Error(t("Update Carbon before uploading a project image.", "请更新 Carbon 后再上传项目图片。"));
           setAssetRevision((value) => value + 1);
           notifyCatalogIconAssetChanged();
         } else if (imageIntent.kind === "clear") {
           const result = await deleteAsset.mutateAsync({ target: "project", id: target.id });
-          if (!result.available) throw new Error(t("Project image removal needs a newer Carbon sidecar.", "项目图片移除需要更新的 Carbon 本地服务。"));
+          if (!result.available) throw new Error(t("Update Carbon before removing a project image.", "请更新 Carbon 后再移除项目图片。"));
           setAssetRevision((value) => value + 1);
           notifyCatalogIconAssetChanged();
         }
@@ -623,7 +623,7 @@ function ProjectEditorDialog({
           sourcePath: source,
         });
         if (!result.available) {
-          setError(t("This Carbon sidecar cannot add projects.", "此 Carbon 本地服务无法添加项目。"));
+          setError(t("This Carbon version cannot add projects. Update Carbon and try again.", "当前 Carbon 版本暂不支持添加项目，请更新后重试。"));
           return;
         }
         const target = { project: result.data, clusterId: clusterId || undefined };
@@ -651,14 +651,14 @@ function ProjectEditorDialog({
           kind: kind.trim() || undefined,
         });
         if (!result.available) {
-          setError(t("This Carbon sidecar cannot save projects.", "此 Carbon 本地服务无法保存项目。"));
+          setError(t("This Carbon version cannot save projects. Update Carbon and try again.", "当前 Carbon 版本暂不支持保存项目，请更新后重试。"));
           return;
         }
       }
       if (source !== (project.source?.path ?? "")) {
         const result = await relink.mutateAsync({ clusterId: clusterId || undefined, projectId: project.id, sourcePath: source });
         if (!result.available) {
-          setError(t("This Carbon sidecar cannot link this source folder.", "此 Carbon 本地服务无法关联该源码文件夹。"));
+          setError(t("This Carbon version cannot link this source folder. Update Carbon and try again.", "当前 Carbon 版本暂不支持关联源码文件夹，请更新后重试。"));
           return;
         }
       }
@@ -879,7 +879,7 @@ function ProjectTaskDataClearDialog({
               <AlertDescription>
                 <ul className="ml-4 flex list-disc flex-col gap-1">
                   <li>{t("The project, its configuration, source-folder link, and icon.", "项目本身、项目配置、源码文件夹关联和图标。")}</li>
-                  <li>{t("Workers, aliases, and lifecycle records.", "Worker、别名及其生命周期记录。")}</li>
+                  <li>{t("Agents, display names, and history.", "智能体、显示名称及历史记录。")}</li>
                   <li>{t("Work Logs. New task IDs continue increasing and are never reused.", "工作日志。新建任务的 ID 会继续递增，绝不会重置或复用。")}</li>
                 </ul>
               </AlertDescription>
@@ -926,7 +926,7 @@ function ProjectTaskDataClearDialog({
   );
 }
 
-function ProjectDeleteDialog({
+export function ProjectDeleteDialog({
   project,
   stage,
   confirmationName,
@@ -1082,7 +1082,7 @@ function AdvancedMaintenance({ home }: { home: string }) {
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle className="text-base">{t("Legacy migration", "旧版迁移")}</CardTitle><CardDescription>{t("Preview an older cluster and keep an auditable receipt before applying it.", "先预览旧集群，确认后才迁移并保留可审计回执。")}</CardDescription></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t("Legacy migration", "旧版迁移")}</CardTitle><CardDescription>{t("Preview an older cluster before migrating it, and keep a confirmation record.", "先预览旧集群，确认后再迁移，并保留迁移确认记录。")}</CardDescription></CardHeader>
           <CardContent className="space-y-3">
             <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); const value = legacyCluster.trim(); if (!value) return; setConfigPolicy(""); previewMigration.mutate(value, { onSuccess: (result) => { if (result.available) setReviewedLegacyCluster(value); } }); }}>
               <Input value={legacyCluster} onChange={(event) => setLegacyCluster(event.target.value)} placeholder={t("Legacy cluster path", "旧版项目集群路径")} className="font-mono text-sm" />

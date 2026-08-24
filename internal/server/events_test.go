@@ -202,6 +202,50 @@ func TestHubRefCountedTeardown(t *testing.T) {
 	}
 }
 
+// The final cancel is synchronous: Windows cannot remove a TempDir while fsnotify
+// still owns a handle below it. This regression test catches a return from cancel
+// before the reader and debounce goroutines have both stopped.
+func TestHubFinalUnsubscribeJoinsWatcherGoroutines(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, repo.CarbonDirName, "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(10 * time.Millisecond)
+	_, cancel, err := hub.Subscribe(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hub.mu.Lock()
+	rw := hub.roots[root]
+	hub.mu.Unlock()
+	if rw == nil {
+		t.Fatal("subscription did not install a root watcher")
+	}
+
+	cancel()
+	if got := hub.activeRoots(); got != 0 {
+		t.Fatalf("activeRoots after final cancel = %d, want 0", got)
+	}
+
+	joined := make(chan struct{})
+	go func() {
+		rw.wg.Wait()
+		close(joined)
+	}()
+	select {
+	case <-joined:
+	case <-time.After(time.Second):
+		t.Fatal("final cancel returned before watcher goroutines stopped")
+	}
+
+	// RemoveAll is specifically meaningful on Windows: it fails while an fsnotify
+	// handle is live. It also proves the cancel path did not leave an async cleanup.
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("remove watched TempDir after final cancel: %v", err)
+	}
+}
+
 // A single atomic save (temp file + rename + chmod) is a burst of raw fs events for one
 // task; the coalescer must collapse it to one task-changed event.
 func TestCoalesceCollapsesBurstToOneTaskEvent(t *testing.T) {

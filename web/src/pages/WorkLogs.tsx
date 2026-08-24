@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { ChevronRight, FilePlus2, ListChecks, Search, SlidersHorizontal } from "lucide-react";
+import { ChevronRight, FilePlus2, ListChecks, MessageSquareDashed, Search, SlidersHorizontal } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
@@ -9,7 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { WorkLogEditorDialog } from "@/components/WorkLogEditorDialog";
 import { WorkLogDetailsDialog } from "@/components/WorkLogDetailsDialog";
 import { WorkLogTable } from "@/components/WorkLogTable";
-import { WORK_LOG_VISIBILITIES, type TaskNavigationTarget, type WorkLog, type WorkLogDraft, type WorkLogFilters, type WorkLogVisibility } from "@/components/WorkLogTypes";
+import { isWorkLogCoordinationDraft, WORK_LOG_VISIBILITIES, type TaskNavigationTarget, type WorkLog, type WorkLogDraft, type WorkLogFilters, type WorkLogVisibility } from "@/components/WorkLogTypes";
 import { visibilityDetail } from "@/components/WorkLogVisibilityBadge";
 import type {
   CarbonHomeCluster,
@@ -19,6 +19,7 @@ import type {
 } from "@/lib/carbon-api";
 import {
   useCarbonWorkLogs,
+  useCarbonWorkerIdentities,
   useCreateCarbonWorkLog,
   useDeleteCarbonWorkLog,
   useUpdateCarbonWorkLog,
@@ -27,6 +28,7 @@ import { useI18n } from "@/lib/i18n";
 import { useIdentity } from "@/lib/identity";
 
 type ScopeMode = WorkLogFilters["scope"];
+type EntryKind = "all" | "coordination" | "records";
 
 function preserveNativeTextContextMenu(event: MouseEvent<HTMLElement>) {
   const target = event.target;
@@ -78,6 +80,7 @@ export function WorkLogs({
   const [worker, setWorker] = useState(initialWorker);
   const [taskId, setTaskId] = useState(initialTaskId);
   const [visibility, setVisibility] = useState<WorkLogVisibility | "all">(initialVisibility ?? "all");
+  const [entryKind, setEntryKind] = useState<EntryKind>("all");
   const [editorLog, setEditorLog] = useState<WorkLog | null | undefined>(undefined);
   const [viewLog, setViewLog] = useState<WorkLog | null>(null);
   const [deleteLog, setDeleteLog] = useState<WorkLog | null>(null);
@@ -134,6 +137,7 @@ export function WorkLogs({
     limit: 100,
   }), [effectiveProjectId, effectiveScopeMode, taskId, visibility, worker]);
   const logsQuery = useCarbonWorkLogs(requestScope, filters, canRead);
+  const identitiesQuery = useCarbonWorkerIdentities(requestScope, canRead);
   const createLog = useCreateCarbonWorkLog(requestScope);
   const updateLog = useUpdateCarbonWorkLog(requestScope);
   const removeLog = useDeleteCarbonWorkLog(requestScope);
@@ -142,7 +146,7 @@ export function WorkLogs({
     () => logsQuery.data?.available ? logsQuery.data.data.worklogs as WorkLog[] : [],
     [logsQuery.data],
   );
-  const logs = useMemo<WorkLog[]>(() => rawLogs.filter((log) => {
+  const scopedLogs = useMemo<WorkLog[]>(() => rawLogs.filter((log) => {
     if (effectiveScopeMode === "all") return true;
     // Standalone project logs intentionally have no cluster ID. Compare a
     // cluster only when one was explicitly selected, then retain the regular
@@ -150,13 +154,20 @@ export function WorkLogs({
     if (effectiveClusterId && log.clusterId !== effectiveClusterId) return false;
     return effectiveScopeMode !== "project" || log.projectId === effectiveProjectId;
   }), [effectiveClusterId, effectiveProjectId, effectiveScopeMode, rawLogs]);
+  const logs = useMemo<WorkLog[]>(() => scopedLogs.filter((log) => {
+    if (entryKind === "all") return true;
+    const draft = isWorkLogCoordinationDraft(log);
+    return entryKind === "coordination" ? draft : !draft;
+  }), [entryKind, scopedLogs]);
+  const identityModeEnabled = identitiesQuery.data?.available === true && identitiesQuery.data.data.modeEnabled;
   const pendingId = updateLog.isPending ? editorLog?.id : removeLog.isPending ? deleteLog?.id : undefined;
-  const filtersActive = Boolean(worker.trim() || taskId.trim() || visibility !== "all");
+  const filtersActive = Boolean(worker.trim() || taskId.trim() || visibility !== "all" || entryKind !== "all");
 
   const resetFilters = () => {
     setWorker("");
     setTaskId("");
     setVisibility("all");
+    setEntryKind("all");
   };
   const openCreate = () => {
     setWriteError("");
@@ -164,7 +175,7 @@ export function WorkLogs({
   };
   const openEdit = (log: WorkLog) => {
     if (!log.version) {
-      setWriteError(t("This Work Log has no optimistic version. Refresh it before editing.", "此 Work Log 没有乐观锁版本。请刷新后再编辑。"));
+      setWriteError(t("This work log is out of date. Refresh it before editing.", "这条工作日志已过期，请刷新后再编辑。"));
       return;
     }
     setWriteError("");
@@ -174,7 +185,7 @@ export function WorkLogs({
     setWriteError("");
     try {
       if (editorLog?.id) {
-        if (!expectedVersion) throw new Error(t("A fresh Work Log version is required before saving.", "保存前需要最新的 Work Log 版本。"));
+        if (!expectedVersion) throw new Error(t("Refresh this work log before saving your changes.", "请先刷新这条工作日志，再保存修改。"));
         const input: CarbonWorkLogUpdate = {
           visibility: draft.visibility,
           title: draft.title,
@@ -187,7 +198,7 @@ export function WorkLogs({
           expectedVersion,
         };
         const result = await updateLog.mutateAsync({ id: editorLog.id, input });
-        if (!result.available) throw new Error(t("Work Logs need a newer Carbon sidecar.", "Work Logs 需要更新的 Carbon sidecar。"));
+        if (!result.available) throw new Error(t("Work logs are not available in this Carbon installation yet.", "当前 Carbon 服务暂未提供工作日志功能。"));
       } else {
         const input: CarbonWorkLogCreate = {
           visibility: draft.visibility,
@@ -198,28 +209,28 @@ export function WorkLogs({
           ...(draft.tags?.length ? { tags: draft.tags } : {}),
         };
         const result = await createLog.mutateAsync(input);
-        if (!result.available) throw new Error(t("Work Logs need a newer Carbon sidecar.", "Work Logs 需要更新的 Carbon sidecar。"));
+        if (!result.available) throw new Error(t("Work logs are not available in this Carbon installation yet.", "当前 Carbon 服务暂未提供工作日志功能。"));
       }
       setEditorLog(undefined);
     } catch (error) {
-      setWriteError(messageFor(error, t("Could not save Work Log.", "无法保存 Work Log。")));
+      setWriteError(messageFor(error, t("Could not save this work log.", "无法保存这条工作日志。")));
       throw error;
     }
   };
   const confirmDelete = async () => {
     if (!deleteLog) return;
     if (!deleteLog.version) {
-      setWriteError(t("This Work Log has no optimistic version. Refresh it before deleting.", "此 Work Log 没有乐观锁版本。请刷新后再删除。"));
+      setWriteError(t("This work log is out of date. Refresh it before deleting.", "这条工作日志已过期，请刷新后再删除。"));
       setDeleteLog(null);
       return;
     }
     setWriteError("");
     try {
       const result = await removeLog.mutateAsync({ id: deleteLog.id, expectedVersion: deleteLog.version });
-      if (!result.available) throw new Error(t("Work Logs need a newer Carbon sidecar.", "Work Logs 需要更新的 Carbon sidecar。"));
+      if (!result.available) throw new Error(t("Work logs are not available in this Carbon installation yet.", "当前 Carbon 服务暂未提供工作日志功能。"));
       setDeleteLog(null);
     } catch (error) {
-      setWriteError(messageFor(error, t("Could not delete Work Log.", "无法删除 Work Log。")));
+      setWriteError(messageFor(error, t("Could not delete this work log.", "无法删除这条工作日志。")));
     }
   };
 
@@ -229,13 +240,13 @@ export function WorkLogs({
         <div className="flex min-w-0 items-center gap-2">
           <ListChecks className="size-4 shrink-0 text-brand" />
           <div className="min-w-0">
-            <h1 className="text-sm font-semibold">Work Logs</h1>
-            <p className="truncate text-xs text-muted-foreground">{t("Operational notes with durable audit fields", "带有持久审计字段的运营记录")}</p>
+            <h1 className="text-sm font-semibold">{t("Work logs", "工作日志")}</h1>
+            <p className="truncate text-xs text-muted-foreground">{t("Keep progress, decisions, and handoffs in one place", "把进展、决策和交接集中记录下来")}</p>
           </div>
         </div>
-        <Button size="sm" disabled={!canWrite} onClick={openCreate} title={!canWrite ? t("Choose a project cluster to create a Work Log.", "请选择项目集群后再创建 Work Log。") : undefined}>
+        <Button size="sm" disabled={!canWrite} onClick={openCreate} title={!canWrite ? t("Choose a project before creating a work log.", "请选择项目后再创建工作日志。") : undefined}>
           <FilePlus2 data-icon="inline-start" />
-          {t("New Work Log", "新建 Work Log")}
+          {t("New work log", "新建工作日志")}
         </Button>
       </header>
 
@@ -279,7 +290,7 @@ export function WorkLogs({
             spacing={0}
             onValueChange={(value) => value && setScopeMode(value as ScopeMode)}
             className="ml-auto"
-            aria-label={t("Work Log scope", "Work Log 范围")}
+            aria-label={t("Work log scope", "工作日志范围")}
           >
             <ToggleGroupItem value="all">{t("All", "全部")}</ToggleGroupItem>
             {allowClusterScope && <ToggleGroupItem value="cluster" disabled={!clusterId}>{t("Cluster", "集群")}</ToggleGroupItem>}
@@ -289,10 +300,22 @@ export function WorkLogs({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {identityModeEnabled && (
+          <div className="flex items-start gap-2 border-b border-brand/20 bg-brand/8 px-4 py-2 text-xs leading-relaxed text-muted-foreground">
+            <MessageSquareDashed className="mt-0.5 size-4 shrink-0 text-brand" />
+            <p>
+              <span className="font-medium text-foreground">{t("Team identity coordination is on.", "团队身份协作已启用。")}</span>{" "}
+              {t(
+                "Agents can share drafts before a task is taken over, choose teammates to receive them, continue a discussion, and pass work along. Regular private logs remain private.",
+                "智能体可以在任务被接手前写下草稿、指定接收对象、延续讨论并分配后续工作；普通私有日志仍只对相关人员可见。",
+              )}
+            </p>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
           <div className="flex min-w-44 flex-1 items-center gap-2 rounded-md border bg-muted/15 px-2">
             <Search className="size-3.5 shrink-0 text-muted-foreground" />
-            <Input value={worker} onChange={(event) => setWorker(event.target.value)} className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0" placeholder={t("Filter canonical Worker", "筛选 canonical Worker")} />
+            <Input value={worker} onChange={(event) => setWorker(event.target.value)} className="h-7 min-w-0 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0" placeholder={t("Filter by agent or connection ID", "筛选智能体或连接标识")} />
           </div>
           <Input value={taskId} onChange={(event) => setTaskId(event.target.value)} className="h-8 w-44 font-mono text-xs" placeholder={t("Task ID", "任务 ID")} />
           <Select value={visibility} onValueChange={(value) => setVisibility(value as WorkLogVisibility | "all")}>
@@ -302,17 +325,32 @@ export function WorkLogs({
               {WORK_LOG_VISIBILITIES.map((item) => <SelectItem key={item} value={item}>{visibilityDetail(item, t).label}</SelectItem>)}
             </SelectContent>
           </Select>
+          {identityModeEnabled && (
+            <ToggleGroup
+              type="single"
+              value={entryKind}
+              variant="outline"
+              size="sm"
+              spacing={0}
+              onValueChange={(value) => value && setEntryKind(value as EntryKind)}
+              aria-label={t("Work log entry type", "工作日志类型")}
+            >
+              <ToggleGroupItem value="all">{t("All", "全部")}</ToggleGroupItem>
+              <ToggleGroupItem value="coordination">{t("Drafts", "草稿")}</ToggleGroupItem>
+              <ToggleGroupItem value="records">{t("Records", "记录")}</ToggleGroupItem>
+            </ToggleGroup>
+          )}
           {filtersActive && <Button variant="ghost" size="sm" onClick={resetFilters}><SlidersHorizontal data-icon="inline-start" />{t("Reset", "重置")}</Button>}
           <span className="ml-auto text-xs text-muted-foreground">{logsQuery.isLoading ? t("Loading…", "加载中…") : `${logs.length} ${t("entries", "条")}`}</span>
         </div>
 
         {!available && !logsQuery.isLoading && (
           <Alert className="m-4 mb-0">
-            <AlertTitle>{t("Work Logs need Carbon stable v2", "Work Logs 需要 Carbon stable v2")}</AlertTitle>
-            <AlertDescription>{t("The sidecar did not expose the audit-log API. Carbon will not synthesize notes locally.", "当前 sidecar 未提供审计日志 API。Carbon 不会在本地伪造记录。")}</AlertDescription>
+            <AlertTitle>{t("Work logs are not available yet", "工作日志暂不可用")}</AlertTitle>
+            <AlertDescription>{t("This Carbon installation does not provide work logs for the selected project. Carbon will not invent records locally.", "当前 Carbon 服务未向所选项目提供工作日志。Carbon 不会在本地补造记录。")}</AlertDescription>
           </Alert>
         )}
-        {writeError && <Alert variant="destructive" className="m-4 mb-0"><AlertTitle>{t("Work Log action failed", "Work Log 操作失败")}</AlertTitle><AlertDescription>{writeError}</AlertDescription></Alert>}
+        {writeError && <Alert variant="destructive" className="m-4 mb-0"><AlertTitle>{t("Could not update the work log", "工作日志操作未完成")}</AlertTitle><AlertDescription>{writeError}</AlertDescription></Alert>}
         <div className="min-w-0 flex-1 overflow-auto">
           {logsQuery.isLoading ? <WorkLogTableSkeleton /> : available && (
             <WorkLogTable
@@ -326,9 +364,9 @@ export function WorkLogs({
                 setDeleteLog(log);
               }}
               onView={setViewLog}
-              canEdit={(log) => Boolean(currentActor && log.worker === currentActor)}
-              canDelete={(log) => Boolean(currentActor && log.worker === currentActor)}
-              emptyLabel={t("No Work Logs match this scope or filter.", "没有符合此范围或筛选条件的 Work Logs。")}
+              canEdit={(log) => Boolean(currentActor && log.worker === currentActor && !isWorkLogCoordinationDraft(log))}
+              canDelete={(log) => Boolean(currentActor && log.worker === currentActor && !isWorkLogCoordinationDraft(log))}
+              emptyLabel={t("No work logs match this scope or filter.", "没有符合此范围或筛选条件的工作日志。")}
             />
           )}
         </div>
@@ -352,9 +390,9 @@ export function WorkLogs({
       <ConfirmDeleteDialog
         open={deleteLog !== null}
         onOpenChange={(open) => !open && setDeleteLog(null)}
-        title={t("Delete Work Log?", "删除 Work Log？")}
-        description={t("This permanently removes this operational record. Its task linkage and audit fields cannot be restored from the Work Log store.", "这会永久移除此运营记录。其任务关联和审计字段无法从 Work Log 存储恢复。")}
-        confirmLabel={t("Delete Work Log", "删除 Work Log")}
+        title={t("Delete this work log?", "删除这条工作日志？")}
+        description={t("This permanently removes this entry. Its linked task and record information cannot be restored.", "这会永久删除此条记录；关联任务和记录信息无法恢复。")}
+        confirmLabel={t("Delete work log", "删除工作日志")}
         pending={removeLog.isPending}
         onConfirm={() => void confirmDelete()}
       />

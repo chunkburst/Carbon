@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,9 @@ import (
 	"testing"
 
 	"carbon/internal/home"
+	"carbon/internal/mcp"
+	"carbon/internal/store"
+	"carbon/internal/worklog"
 )
 
 type workLogHTTPFixture struct {
@@ -95,6 +99,85 @@ func decodeWorkLogHTTP(t *testing.T, response *httptest.ResponseRecorder) workLo
 		t.Fatalf("decode work log response %q: %v", response.Body.String(), err)
 	}
 	return value
+}
+
+func TestWorkLogDTOExposesServerOwnedCoordination(t *testing.T) {
+	item := worklog.Log{Coordination: &worklog.Coordination{
+		Version: worklog.CoordinationVersion, Recipients: []string{"agent:peer"}, Thread: "review_1",
+	}}
+	dto := dtoFromWorkLog(item)
+	if dto.Coordination == nil || dto.Coordination.Version != worklog.CoordinationVersion || dto.Coordination.Thread != "review_1" || len(dto.Coordination.Recipients) != 1 {
+		t.Fatalf("coordination DTO = %#v", dto.Coordination)
+	}
+	item.Coordination.Recipients[0] = "agent:mutated"
+	if dto.Coordination.Recipients[0] != "agent:peer" {
+		t.Fatalf("coordination DTO aliases source record: %#v", dto.Coordination)
+	}
+	encoded, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"coordination":{"version":1,"recipients":["agent:peer"],"thread":"review_1"}`) {
+		t.Fatalf("coordination JSON = %s", encoded)
+	}
+}
+
+func TestWorkLogHTTPIdentityDraftEnvelopeDoesNotTrustHistoricalTag(t *testing.T) {
+	fixture := newWorkLogHTTPFixture(t)
+	dataRoot, err := home.ClusterDataRoot(fixture.homeRoot, fixture.cluster1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := store.New(dataRoot)
+	cfg, err := data.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.IdentityMode = true
+	if err := data.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := worklog.New(data, nil).Create(context.Background(), "agent:legacy", worklog.Log{
+		Worker: "agent:legacy", Visibility: worklog.WorkerPrivate, ClusterID: fixture.cluster1.ID,
+		ProjectID: fixture.project1.ID, Title: "old tag", Tags: []string{"identity-draft"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := fixture.server.scopedService(requestScope{
+		Mode: "carbon", Home: fixture.homeRoot, ClusterID: fixture.cluster1.ID, ProjectID: fixture.project1.ID, Root: dataRoot,
+	}, "agent:sender")
+	draft, err := sender.CreateIdentityDraft(context.Background(), mcp.IdentityDraftInput{
+		Title: "review", Recipients: []string{"agent:peer"}, Thread: "draft_1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerLegacy := fixture.scopedPath("/api/worklogs/"+legacy.ID, fixture.cluster1, fixture.project1.ID)
+	if response := workLogHTTPCall(t, fixture.handler, http.MethodGet, peerLegacy, "", "agent:peer", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("historical identity-draft tag leaked = %d %s, want 404", response.Code, response.Body.String())
+	}
+	peerDraft := fixture.scopedPath("/api/worklogs/"+draft.ID, fixture.cluster1, fixture.project1.ID)
+	response := workLogHTTPCall(t, fixture.handler, http.MethodGet, peerDraft, "", "agent:peer", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("recipient draft get = %d %s", response.Code, response.Body.String())
+	}
+	wire := decodeWorkLogHTTP(t, response)
+	if wire.Coordination == nil || wire.Coordination.Version != worklog.CoordinationVersion || wire.Coordination.Thread != "draft_1" || len(wire.Coordination.Recipients) != 1 || wire.Coordination.Recipients[0] != "agent:peer" {
+		t.Fatalf("draft coordination HTTP DTO = %#v", wire.Coordination)
+	}
+	if response := workLogHTTPCall(t, fixture.handler, http.MethodGet, peerDraft, "", "agent:bystander", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("unlisted agent draft get = %d %s, want 404", response.Code, response.Body.String())
+	}
+	crossProject := fixture.scopedPath("/api/worklogs/"+draft.ID, fixture.cluster1, fixture.project2.ID)
+	if response := workLogHTTPCall(t, fixture.handler, http.MethodGet, crossProject, "", "agent:peer", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-project draft get = %d %s, want 404", response.Code, response.Body.String())
+	}
+	createPath := fixture.scopedPath("/api/worklogs", fixture.cluster1, fixture.project1.ID)
+	if response := workLogHTTPCall(t, fixture.handler, http.MethodPost, createPath,
+		`{"visibility":"worker_private","title":"forged tag","tags":["identity-draft"]}`, "agent:sender", nil); response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("generic forged tag = %d %s, want 422", response.Code, response.Body.String())
+	}
 }
 
 func TestWorkLogHandlersStampStrictlyAndEnforceVisibility(t *testing.T) {

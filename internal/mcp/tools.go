@@ -34,7 +34,7 @@ const serverInstructions = `Use identity first. It returns this connection's fix
 
 Carbon v2 is the approved stable layer. A project-bound connection reads and writes only its bound project by default; include_cluster=true is an explicit same-cluster read expansion and never expands writes or crosses clusters. Read the current record before a write and pass its raw version or quoted ETag as expected_version whenever a tool marks it required; stale writes are rejected.
 
-set_blocker, add_evidence, remove_evidence, and lease_claim require expected_version. Carbon v2 ownership uses lease_claim with a non-empty reason and current expected_version; the historical claim tool is registered only for frozen legacy v1. Blocker text remains until explicitly cleared. Evidence is a server-audited task proof. Work Logs are separate durable Worker records: worker_private is isolated to its Worker, project_public follows the bound project/cluster scope, and global_public is readable only within the same Carbon home.
+set_blocker, add_evidence, remove_evidence, and lease_claim require expected_version. Carbon v2 ownership uses lease_claim with a non-empty reason and current expected_version; the historical claim tool is registered only for frozen legacy v1. When a project enables Identity Mode, claim a worker identity with allowed task types before lease_claim or begin on a typed task; human/system actors and older untyped tasks remain compatible. Blocker text remains until explicitly cleared. Evidence is a server-audited task proof. Work Logs are separate durable Worker records: worker_private is isolated to its Worker, project_public follows the bound project/cluster scope, and global_public is readable only within the same Carbon home. Identity Mode additionally permits append-only worklog_draft_send server-owned identity-draft coordination records in the same project: named recipients are an exact Agent allow-list, while an empty recipient list broadcasts to that project; ordinary worker_private logs never become visible to peers.
 
 v1 is the frozen LegacyLayer for explicit --repo workspaces. It keeps the historical task/session surface and does not gain Carbon catalog, lease, Work Log, or other v2 tools.`
 
@@ -433,6 +433,27 @@ func newServer(svc *Service, projectSession *ProjectSession) *mcpsdk.Server {
 	// as HTTP: a project-bound connection defaults to its own project, and only an
 	// explicit include_cluster opt-in broadens reads within the current cluster.
 	if carbonStableTasks {
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "worker_identity_list",
+			Description: "Carbon v2 stable read: list this selected project or shared-cluster's Worker identity records and whether Identity Mode is enabled. Reading is safe while disabled; records are retained for a later re-enable."},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, WorkerIdentitySnapshot, error) {
+				out, err := svc.ListWorkerIdentities()
+				return nil, out, err
+			})
+
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "worker_identity_get",
+			Description: "Carbon v2 stable read: get one canonical agent Worker identity in this selected project or shared cluster. actor is required and no task ownership changes."},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, in workerIdentityGetIn) (*mcpsdk.CallToolResult, WorkerIdentityResult, error) {
+				out, err := svc.GetWorkerIdentity(in.Actor)
+				return nil, out, err
+			})
+
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "worker_identity_claim",
+			Description: "Carbon v2 stable write: claim or change this connection Agent's role and one or more allowed task types. Identity Mode must be enabled. The first claim may omit reason; a later role/type change requires a non-empty reason."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in workerIdentityClaimIn) (*mcpsdk.CallToolResult, WorkerIdentityResult, error) {
+				out, err := svc.ClaimWorkerIdentity(ctx, WorkerIdentityClaimInput{Role: in.Role, Types: append([]string(nil), in.Types...), Reason: in.Reason})
+				return nil, out, err
+			})
+
 		registerWorkLogToolsWithAccessor(srv, func() *Service { return svc })
 
 		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "set_blocker",
@@ -809,6 +830,16 @@ type listSessionsIn struct {
 
 type sessionsOut struct {
 	Sessions []SessionView `json:"sessions"`
+}
+
+type workerIdentityGetIn struct {
+	Actor string `json:"actor" jsonschema:"required canonical agent actor, for example agent:architect"`
+}
+
+type workerIdentityClaimIn struct {
+	Role   string   `json:"role" jsonschema:"required durable Worker role, for example 架构师"`
+	Types  []string `json:"types" jsonschema:"required one or more current task type keys this Worker may claim"`
+	Reason string   `json:"reason,omitempty" jsonschema:"required when changing an existing role or type assignment"`
 }
 
 type includeClusterIn struct {

@@ -1,16 +1,43 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, GitBranch, Inbox, Loader2, MoreHorizontal, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  pointerWithin,
+  rectIntersection,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Bot, CandlestickChart, CheckCircle2, ChevronRight, GitBranch, GripVertical, Inbox, LayoutGrid, List, Loader2, MoreHorizontal, PictureInPicture2, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
 import { Assignee } from "@/components/Assignee";
+import { CarbonAnimationBoard } from "@/components/CarbonAnimationBoard";
 import { BoardBackgroundContextMenu } from "@/components/BoardBackgroundContextMenu";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { CarbonTaskContextMenu } from "@/components/CarbonTaskContextMenu";
 import { EmptyState } from "@/components/EmptyState";
 import { Facet } from "@/components/Facet";
+import { SearchableFacet } from "@/components/SearchableFacet";
 import { PriorityIcon, priorityLabel } from "@/components/PriorityIcon";
 import { SessionStatus } from "@/components/SessionStatus";
 import { StatusIcon } from "@/components/StatusIcon";
 import { TaskMetadata } from "@/components/TaskMetadata";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
@@ -28,15 +55,28 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { effectiveRank } from "@/lib/filter";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  compareTaskOrder,
+  moveTaskAcrossStatuses,
+  moveTaskForDropPreview,
+  rankForTaskDrop,
+  type TaskDropPreviewMove,
+  type TaskColumns,
+} from "@/lib/task-order";
 import { useI18n, type Translate } from "@/lib/i18n";
 import {
-  getBoardPresentation,
+  getAnimationBoardStyle,
   getBoardStatusSectionOpen,
+  getTaskListPresentation,
+  isAnimationBoardStyle,
   PERSONALIZATION_EVENT,
-  setBoardPresentation,
+  setAnimationBoardStyle,
   setBoardStatusSectionOpen,
+  setTaskListPresentation,
+  type AnimationBoardStyle,
   type BoardPresentation,
+  type TaskListPresentation,
 } from "@/lib/personalization";
 import { carbonImportanceLabel, carbonTaskTypeLabel } from "@/lib/task-labels";
 import { cn, labelTone, statusLabel, timeAgo } from "@/lib/utils";
@@ -50,6 +90,15 @@ export type CarbonTaskListFilters = {
   assignee: string;
 };
 
+export type CarbonTaskListSurface = "tasks" | "agent-work" | "board";
+
+type AsyncTaskActionResult = Promise<unknown> | unknown;
+
+const CARBON_TASK_DROP_ANIMATION = {
+  duration: 180,
+  easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+};
+
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -59,9 +108,27 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   return debounced;
 }
 
+function usePrefersReducedMotion(): boolean {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setPrefersReducedMotion(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
 type CarbonTaskListProps = {
   /** Stable Home/project key used for locally persisted board affordances. */
   storageKey: string;
+  /** Explicit task-query scope used to seed an independent market per project/cluster view. */
+  marketKey?: string;
   tasks: Task[];
   status: Status;
   loading?: boolean;
@@ -70,25 +137,30 @@ type CarbonTaskListProps = {
   taskHref?: (task: Task) => string;
   onNewTask: () => void;
   onRefresh?: () => void;
-  onTransition: (task: Task, to: string) => void;
+  onTransition: (task: Task, to: string) => AsyncTaskActionResult;
+  onReorder: (task: Task, rank: number) => AsyncTaskActionResult;
   onTrashTask?: (task: Task) => void;
   transitioningId?: string;
   filters: CarbonTaskListFilters;
   onFiltersChange: (filters: CarbonTaskListFilters) => void;
   toolbarExtras?: ReactNode;
+  /** Functional lists and the visual board are intentionally separate surfaces. */
+  surface?: CarbonTaskListSurface;
+  floatingBoardOpen?: boolean;
+  onFloatingBoardToggle?: () => void;
   bulkMode?: boolean;
   selectedIds?: ReadonlySet<string>;
   onSelectionChange?: (ids: Set<string>) => void;
 };
 
 /**
- * The Carbon task surface deliberately uses the original Carbon information-dense
- * list treatment: workflow sections stack vertically and every task occupies one
- * row. Carbon keeps the scoped transport outside this component so it cannot widen
- * a project's read/write boundary.
+ * Carbon keeps workflow sections vertical while letting people choose an information-
+ * dense row or card presentation. The scoped transport stays outside this component
+ * so drag-and-drop cannot widen a project's read/write boundary.
  */
 export function CarbonTaskList({
   storageKey,
+  marketKey = storageKey,
   tasks,
   status,
   loading = false,
@@ -98,11 +170,15 @@ export function CarbonTaskList({
   onNewTask,
   onRefresh,
   onTransition,
+  onReorder,
   onTrashTask,
   transitioningId,
   filters,
   onFiltersChange,
   toolbarExtras,
+  surface = "tasks",
+  floatingBoardOpen = false,
+  onFloatingBoardToggle,
   bulkMode = false,
   selectedIds,
   onSelectionChange,
@@ -112,8 +188,22 @@ export function CarbonTaskList({
   const searchRef = useRef<HTMLInputElement>(null);
   const [keyboardIndex, setKeyboardIndex] = useState(0);
   const [pendingTrash, setPendingTrash] = useState<Task | null>(null);
-  const [presentation, setPresentation] = useState<BoardPresentation>(getBoardPresentation);
+  const [listPresentation, setListPresentation] = useState<TaskListPresentation>(getTaskListPresentation);
+  const [animationStyle, setAnimationStyle] = useState<AnimationBoardStyle>(getAnimationBoardStyle);
   const [sectionCommand, setSectionCommand] = useState<{ revision: number; open: boolean; scopeKey: string } | null>(null);
+  const [columns, setColumns] = useState<TaskColumns>({});
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [settlingDrop, setSettlingDrop] = useState(false);
+  const columnsRef = useRef<TaskColumns>({});
+  const activeIdRef = useRef<string | null>(null);
+  const settlingDropRef = useRef(false);
+  const lastOverRef = useRef<string | null>(null);
+  const hasCrossedStatusRef = useRef(false);
+  const crossStatusMoveRef = useRef<TaskDropPreviewMove | null>(null);
+  const crossStatusFrameRef = useRef<number | null>(null);
+  const suppressOpenIdRef = useRef<string | null>(null);
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const presentation: BoardPresentation = surface === "board" ? "animation" : listPresentation;
   const states = useMemo(() => status.states ?? [], [status.states]);
   const closed = useMemo(() => new Set(status.closed ?? []), [status.closed]);
   const deferredQuery = useDeferredValue(filters.query);
@@ -137,18 +227,25 @@ export function CarbonTaskList({
     ),
     [filters.assignee, filters.label, filters.priority, needle, tasks],
   );
-  const byStatus = useMemo(() => {
-    const grouped = new Map<string, Task[]>(states.map((state) => [state, []]));
-    for (const task of visible) {
-      if (!grouped.has(task.status)) grouped.set(task.status, []);
-      grouped.get(task.status)!.push(task);
-    }
-    for (const list of grouped.values()) {
-      list.sort((left, right) => effectiveRank(left) - effectiveRank(right) || left.id.localeCompare(right.id));
-    }
-    return grouped;
-  }, [states, visible]);
-  const groups = useMemo(() => [...byStatus.entries()].filter(([, list]) => list.length > 0), [byStatus]);
+  const orderedStates = useMemo(
+    () => [...new Set([...states, ...visible.map((task) => task.status).filter(Boolean)])],
+    [states, visible],
+  );
+  const byId = useMemo(() => new Map(visible.map((task) => [task.id, task])), [visible]);
+  const desiredColumns = useMemo(
+    () => createTaskColumns(orderedStates, visible),
+    [orderedStates, visible],
+  );
+  const displayColumns = useMemo(
+    () => Object.keys(columns).length > 0 ? columns : desiredColumns,
+    [columns, desiredColumns],
+  );
+  const groups = useMemo(
+    () => orderedStates
+      .map((state) => [state, (displayColumns[state] ?? []).map((id) => byId.get(id)).filter((task): task is Task => Boolean(task))] as const)
+      .filter(([, list]) => list.length > 0 || activeId !== null),
+    [activeId, byId, displayColumns, orderedStates],
+  );
   const flat = useMemo(() => groups.flatMap(([, list]) => list), [groups]);
   const focusedTaskId = flat[Math.min(keyboardIndex, Math.max(flat.length - 1, 0))]?.id;
   const activeFilters = Boolean(filters.query || filters.priority || filters.label || filters.assignee);
@@ -158,7 +255,10 @@ export function CarbonTaskList({
   useEffect(() => setKeyboardIndex(0), [filters.assignee, filters.label, filters.priority, debouncedQuery]);
 
   useEffect(() => {
-    const syncPresentation = () => setPresentation(getBoardPresentation());
+    const syncPresentation = () => {
+      setListPresentation(getTaskListPresentation());
+      setAnimationStyle(getAnimationBoardStyle());
+    };
     window.addEventListener(PERSONALIZATION_EVENT, syncPresentation);
     window.addEventListener("storage", syncPresentation);
     return () => {
@@ -166,6 +266,28 @@ export function CarbonTaskList({
       window.removeEventListener("storage", syncPresentation);
     };
   }, []);
+
+  useEffect(() => {
+    // Keep a dropped arrangement in place until the scoped mutations settle. Rebuilding
+    // from the query while the pointer is down (or while its request is in flight)
+    // makes cards visibly jump back to their former status/rank.
+    if (activeIdRef.current || settlingDropRef.current) return;
+    setColumns((current) => {
+      if (sameTaskColumns(current, desiredColumns)) {
+        columnsRef.current = current;
+        return current;
+      }
+      columnsRef.current = desiredColumns;
+      return desiredColumns;
+    });
+  }, [activeId, desiredColumns, settlingDrop]);
+
+  useEffect(
+    () => () => {
+      if (crossStatusFrameRef.current !== null) window.cancelAnimationFrame(crossStatusFrameRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -197,8 +319,10 @@ export function CarbonTaskList({
   }, [flat, keyboardIndex, onNewTask, onOpenTask]);
 
   useEffect(() => {
-    if (focusedTaskId) document.getElementById(`row-${focusedTaskId}`)?.scrollIntoView({ block: "nearest" });
-  }, [focusedTaskId]);
+    if (presentation !== "animation" && focusedTaskId) {
+      document.getElementById(`row-${focusedTaskId}`)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [focusedTaskId, presentation]);
 
   const updateFilters = useCallback((patch: Partial<CarbonTaskListFilters>) => onFiltersChange({ ...filters, ...patch }), [filters, onFiltersChange]);
   const clearFilters = useCallback(() => onFiltersChange({ query: "", priority: "", label: "", assignee: "" }), [onFiltersChange]);
@@ -213,10 +337,184 @@ export function CarbonTaskList({
     onSelectionChange?.(checked ? new Set(visible.map((task) => task.id)) : new Set());
   }, [onSelectionChange, visible]);
   const requestTrash = useCallback((task: Task) => setPendingTrash(task), []);
-  const changePresentation = useCallback((next: BoardPresentation) => {
-    setPresentation(next);
-    setBoardPresentation(next);
+  const changePresentation = useCallback((next: TaskListPresentation) => {
+    setListPresentation(next);
+    setTaskListPresentation(next);
   }, []);
+  const changeBoardSurface = useCallback((value: string) => {
+    if (value === "row" || value === "card") {
+      if (surface !== "board") changePresentation(value);
+      return;
+    }
+    if (surface !== "board" || !isAnimationBoardStyle(value)) return;
+    setAnimationStyle(value);
+    setAnimationBoardStyle(value);
+  }, [changePresentation, surface]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    const pointer = pointerWithin(args);
+    return pointer.length ? pointer : rectIntersection(args);
+  }, []);
+  const containerOf = useCallback((id: string, source: TaskColumns = columnsRef.current): string | undefined => {
+    if (id in source) return id;
+    return Object.keys(source).find((state) => source[state]?.includes(id));
+  }, []);
+  const applyCrossStatusMove = useCallback(() => {
+    const move = crossStatusMoveRef.current;
+    crossStatusMoveRef.current = null;
+    if (!move) return;
+    const next = moveTaskForDropPreview(columnsRef.current, move);
+    if (next === columnsRef.current) return;
+    columnsRef.current = next;
+    setColumns(next);
+  }, []);
+  const clearDrag = useCallback(() => {
+    if (crossStatusFrameRef.current !== null) {
+      window.cancelAnimationFrame(crossStatusFrameRef.current);
+      crossStatusFrameRef.current = null;
+    }
+    crossStatusMoveRef.current = null;
+    lastOverRef.current = null;
+    hasCrossedStatusRef.current = false;
+    activeIdRef.current = null;
+    setActiveId(null);
+  }, []);
+  const onDragStart = useCallback((event: DragStartEvent) => {
+    const id = String(event.active.id);
+    if (Object.keys(columnsRef.current).length === 0) columnsRef.current = desiredColumns;
+    activeIdRef.current = id;
+    lastOverRef.current = null;
+    hasCrossedStatusRef.current = false;
+    setActiveId(id);
+  }, [desiredColumns]);
+  const onDragOver = useCallback((event: DragOverEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    const activeTaskId = String(active.id);
+    const overId = String(over.id);
+    const from = containerOf(activeTaskId);
+    const to = containerOf(overId);
+    if (!from || !to) return;
+    // Same-status drags are rendered by SortableContext and committed on release. Once a
+    // gesture has crossed a status, however, its preview must keep following later hover
+    // targets even if it returns to the original column.
+    if (from !== to) hasCrossedStatusRef.current = true;
+    if (from === to && !hasCrossedStatusRef.current) return;
+
+    const after = dropAfterOverItem(event, presentation);
+    const key = `${activeTaskId}:${from}:${to}:${overId}:${after ? "after" : "before"}`;
+    if (lastOverRef.current === key) return;
+    lastOverRef.current = key;
+    crossStatusMoveRef.current = {
+      activeId: activeTaskId,
+      from,
+      to,
+      overId,
+      after,
+      hasCrossedStatus: hasCrossedStatusRef.current,
+    };
+    if (crossStatusFrameRef.current !== null) return;
+    crossStatusFrameRef.current = window.requestAnimationFrame(() => {
+      crossStatusFrameRef.current = null;
+      applyCrossStatusMove();
+    });
+  }, [applyCrossStatusMove, containerOf, presentation]);
+  const guardedOpenTask = useCallback((task: Task) => {
+    if (suppressOpenIdRef.current === task.id) return;
+    onOpenTask(task);
+  }, [onOpenTask]);
+  const onDragEnd = useCallback((event: DragEndEvent) => {
+    if (crossStatusFrameRef.current !== null) {
+      window.cancelAnimationFrame(crossStatusFrameRef.current);
+      crossStatusFrameRef.current = null;
+    }
+    // A fast release can happen before the next animation frame. Commit the queued
+    // cross-status preview before calculating rank so the request matches the UI.
+    applyCrossStatusMove();
+
+    const { active, over } = event;
+    const id = String(active.id);
+    const task = byId.get(id);
+    const to = over ? containerOf(String(over.id)) : undefined;
+    if (!over || !to || !task) {
+      clearDrag();
+      return;
+    }
+    const statusChanged = task.status !== to;
+    const usedCrossStatusPreview = hasCrossedStatusRef.current;
+
+    let nextColumns = columnsRef.current;
+    const currentState = containerOf(id, nextColumns);
+    if (currentState && currentState !== to) {
+      nextColumns = moveTaskAcrossStatuses(nextColumns, {
+        activeId: id,
+        from: currentState,
+        to,
+        overId: String(over.id),
+        after: dropAfterOverItem(event, presentation),
+      });
+    }
+
+    let list = [...(nextColumns[to] ?? [])];
+    const overIndex = list.indexOf(String(over.id));
+    const currentIndex = list.indexOf(id);
+    // Cross-status preview already inserted on the correct before/after side. Running
+    // same-column arrayMove again would invert that final placement on pointer release.
+    if (!usedCrossStatusPreview && overIndex >= 0 && currentIndex >= 0 && overIndex !== currentIndex) {
+      list = arrayMove(list, currentIndex, overIndex);
+      nextColumns = { ...nextColumns, [to]: list };
+    }
+    if (nextColumns !== columnsRef.current) {
+      columnsRef.current = nextColumns;
+      setColumns(nextColumns);
+    }
+
+    const index = list.indexOf(id);
+    if (index < 0) {
+      clearDrag();
+      return;
+    }
+    if (!statusChanged && sameTaskOrder(list, desiredColumns[to] ?? [])) {
+      clearDrag();
+      return;
+    }
+    // Visible filters define the interaction surface, but hidden tasks still define
+    // the durable rank boundaries. This keeps a filtered drop from colliding with or
+    // unexpectedly jumping across tasks that reappear when the filter is cleared.
+    const rank = rankForTaskDrop(id, to, list, tasks);
+
+    // Suppress only the synthetic click that follows a pointer drag; a normal click
+    // remains the task-detail affordance in both presentations.
+    suppressOpenIdRef.current = id;
+    window.setTimeout(() => {
+      if (suppressOpenIdRef.current === id) suppressOpenIdRef.current = null;
+    }, 0);
+    settlingDropRef.current = true;
+    setSettlingDrop(true);
+    clearDrag();
+    void (async () => {
+      try {
+        // Status is a server-validated workflow transition. Never calculate a
+        // destination rank against a state that failed to accept the task.
+        if (statusChanged) await Promise.resolve(onTransition(task, to));
+        await Promise.resolve(onReorder(task, rank));
+      } catch {
+        // Both scoped mutations restore/refetch their query caches on failure.
+      } finally {
+        settlingDropRef.current = false;
+        setSettlingDrop(false);
+      }
+    })();
+  }, [applyCrossStatusMove, byId, clearDrag, containerOf, desiredColumns, onReorder, onTransition, presentation, tasks]);
+  const activeTask = activeId ? byId.get(activeId) : undefined;
+  const surfaceTitle = surface === "board"
+    ? t("Board", "看板")
+    : surface === "agent-work"
+      ? t("Agent work", "智能体工作")
+      : t("Tasks", "任务");
 
   return (
     <>
@@ -232,10 +530,57 @@ export function CarbonTaskList({
           )}
           <span className="font-medium">{status.prefix}</span>
           <ChevronRight className="size-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">{t("Tasks", "任务")}</span>
+          <span className="text-muted-foreground">{surfaceTitle}</span>
           {!loading && <span className="ml-1 text-xs text-muted-foreground">{visible.length}</span>}
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
+          <ToggleGroup
+            type="single"
+            value={surface === "board" ? animationStyle : listPresentation}
+            onValueChange={changeBoardSurface}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            className="shrink-0"
+            aria-label={surface === "board" ? t("Board style", "看板风格") : t("Task presentation", "任务展示")}
+          >
+            {surface === "board" ? (
+              <>
+                <ToggleGroupItem value="pixel-agents" aria-label={t("Work floor", "工作风")} title={t("Studio-style live work floor", "工作室经营视角的实时工作现场")}>
+                  <Bot />
+                  <span className="hidden xl:inline">{t("Work", "工作风")}</span>
+                </ToggleGroupItem>
+                <ToggleGroupItem value="market-kline" aria-label={t("Task K-line", "任务 K 线")} title={t("Task K-line", "任务 K 线")}>
+                  <CandlestickChart />
+                  <span className="hidden xl:inline">{t("K-line", "K 线")}</span>
+                </ToggleGroupItem>
+              </>
+            ) : (
+              <>
+                <ToggleGroupItem value="row" aria-label={t("Row mode", "行模式")} title={t("Row mode", "行模式")}>
+                  <List />
+                  <span className="hidden xl:inline">{t("Rows", "行")}</span>
+                </ToggleGroupItem>
+                <ToggleGroupItem value="card" aria-label={t("Card mode", "卡片模式")} title={t("Card mode", "卡片模式")}>
+                  <LayoutGrid />
+                  <span className="hidden xl:inline">{t("Cards", "卡片")}</span>
+                </ToggleGroupItem>
+              </>
+            )}
+          </ToggleGroup>
+          {onFloatingBoardToggle && (
+            <Button
+              type="button"
+              variant={floatingBoardOpen ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label={floatingBoardOpen ? t("Close floating board", "关闭悬浮窗") : t("Open floating board", "打开悬浮窗")}
+              aria-pressed={floatingBoardOpen}
+              title={floatingBoardOpen ? t("Close floating board", "关闭悬浮窗") : t("Open floating board", "打开悬浮窗")}
+              onClick={onFloatingBoardToggle}
+            >
+              <PictureInPicture2 />
+            </Button>
+          )}
           {toolbarExtras}
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -263,9 +608,12 @@ export function CarbonTaskList({
             </Facet>
           )}
           {labelOptions.length > 0 && (
-            <Facet value={filters.label} onChange={(value) => updateFilters({ label: value })} placeholder={t("Label", "标签")}>
-              {labelOptions.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
-            </Facet>
+            <SearchableFacet
+              value={filters.label}
+              onChange={(value) => updateFilters({ label: value })}
+              placeholder={t("Label", "标签")}
+              options={labelOptions}
+            />
           )}
           {assigneeOptions.length > 0 && (
             <Facet value={filters.assignee} onChange={(value) => updateFilters({ assignee: value })} placeholder={t("Assignee", "负责人")}>
@@ -280,60 +628,92 @@ export function CarbonTaskList({
         </div>
       )}
 
-      <BoardBackgroundContextMenu
-        className="flex-1 overflow-y-auto overscroll-contain py-1"
-        presentation={presentation}
-        onNewTask={onNewTask}
-        onSearch={() => searchRef.current?.focus()}
-        onRefresh={onRefresh ?? (() => undefined)}
-        onExpandAll={() => setSectionCommand((current) => ({ revision: (current?.revision ?? 0) + 1, open: true, scopeKey: storageKey }))}
-        onCollapseAll={() => setSectionCommand((current) => ({ revision: (current?.revision ?? 0) + 1, open: false, scopeKey: storageKey }))}
-        onClearFilters={activeFilters ? clearFilters : undefined}
-        onPresentationChange={changePresentation}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={collisionDetection}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDragEnd={onDragEnd}
+        onDragCancel={clearDrag}
       >
-        {loading ? (
-          <div className="space-y-1.5 px-3 py-2">
-            {Array.from({ length: 8 }).map((_, index) => <Skeleton key={index} className="h-8 w-full" />)}
-          </div>
-        ) : tasks.length === 0 ? (
-          <EmptyState
-            icon={Inbox}
-            title={t("Your task list is empty", "任务列表为空")}
-            message={t("Create a task to start this project.", "新建一个任务，开始推进这个项目。")}
-            action={{ label: t("New task", "新建任务"), icon: Plus, onClick: onNewTask }}
-          />
-        ) : visible.length === 0 ? (
-          <EmptyState
-            icon={Inbox}
-            title={t("No matching tasks", "没有匹配的任务")}
-            message={t("Clear a filter or create a task.", "请清除筛选条件，或新建一个任务。")}
-            action={{ label: t("Clear filters", "清除筛选"), icon: X, onClick: clearFilters }}
-          />
-        ) : (
-          groups.map(([state, list]) => (
-            <CarbonStatusSection
-              key={state}
-              state={state}
-              tasks={list}
-              status={status}
-              storageKey={storageKey}
-              presentation={presentation}
-              sectionCommand={sectionCommand}
-              defaultOpen={!closed.has(state)}
-              focusedTaskId={focusedTaskId}
-              transitioningId={transitioningId}
-              bulkMode={bulkMode}
-              selectedIds={selectedIds}
-              onOpenTask={onOpenTask}
-              onOpenWorker={onOpenWorker}
-              taskHref={taskHref}
-              onTransition={onTransition}
-              onTrashTask={onTrashTask ? requestTrash : undefined}
-              onToggleSelection={toggleSelection}
+        <BoardBackgroundContextMenu
+          className={cn(
+            "flex-1 overscroll-contain py-1",
+            surface === "board" ? "flex min-h-0 flex-col overflow-hidden" : "overflow-y-auto",
+          )}
+          presentation={presentation}
+          surface={surface}
+          animationStyle={animationStyle}
+          floatingBoardOpen={floatingBoardOpen}
+          onNewTask={onNewTask}
+          onSearch={() => searchRef.current?.focus()}
+          onRefresh={onRefresh ?? (() => undefined)}
+          onExpandAll={() => setSectionCommand((current) => ({ revision: (current?.revision ?? 0) + 1, open: true, scopeKey: storageKey }))}
+          onCollapseAll={() => setSectionCommand((current) => ({ revision: (current?.revision ?? 0) + 1, open: false, scopeKey: storageKey }))}
+          onClearFilters={activeFilters ? clearFilters : undefined}
+          onPresentationChange={changePresentation}
+          onAnimationStyleChange={changeBoardSurface}
+          onFloatingBoardToggle={onFloatingBoardToggle}
+        >
+          {loading ? (
+            <div className="space-y-1.5 px-3 py-2">
+              {Array.from({ length: 8 }).map((_, index) => <Skeleton key={index} className="h-8 w-full" />)}
+            </div>
+          ) : tasks.length === 0 ? (
+            <EmptyState
+              icon={Inbox}
+              title={t("Your task list is empty", "任务列表为空")}
+              message={t("Create a task to start this project.", "新建一个任务，开始推进这个项目。")}
+              action={{ label: t("New task", "新建任务"), icon: Plus, onClick: onNewTask }}
             />
-          ))
-        )}
-      </BoardBackgroundContextMenu>
+          ) : visible.length === 0 ? (
+            <EmptyState
+              icon={Inbox}
+              title={t("No matching tasks", "没有匹配的任务")}
+              message={t("Clear a filter or create a task.", "请清除筛选条件，或新建一个任务。")}
+              action={{ label: t("Clear filters", "清除筛选"), icon: X, onClick: clearFilters }}
+            />
+          ) : presentation === "animation" ? (
+            <CarbonAnimationBoard
+              projectKey={marketKey}
+              tasks={visible}
+              status={status}
+              style={animationStyle}
+              onOpenTask={guardedOpenTask}
+              prefersReducedMotion={prefersReducedMotion}
+            />
+          ) : (
+            groups.map(([state, list]) => (
+              <CarbonStatusSection
+                key={state}
+                state={state}
+                tasks={list}
+                status={status}
+                storageKey={storageKey}
+                presentation={presentation}
+                sectionCommand={sectionCommand}
+                defaultOpen={!closed.has(state)}
+                forceOpen={activeId !== null}
+                dragDisabled={settlingDrop}
+                prefersReducedMotion={prefersReducedMotion}
+                focusedTaskId={focusedTaskId}
+                transitioningId={transitioningId}
+                bulkMode={bulkMode}
+                selectedIds={selectedIds}
+                onOpenTask={guardedOpenTask}
+                onOpenWorker={onOpenWorker}
+                taskHref={taskHref}
+                onTransition={onTransition}
+                onTrashTask={onTrashTask ? requestTrash : undefined}
+                onToggleSelection={toggleSelection}
+              />
+            ))
+          )}
+        </BoardBackgroundContextMenu>
+        <DragOverlay dropAnimation={prefersReducedMotion ? null : CARBON_TASK_DROP_ANIMATION}>
+          {activeTask ? <CarbonTaskDragPreview task={activeTask} presentation={presentation} /> : null}
+        </DragOverlay>
+        </DndContext>
     </div>
       <ConfirmDeleteDialog
       open={pendingTrash !== null}
@@ -360,6 +740,9 @@ const CarbonStatusSection = memo(function CarbonStatusSection({
   presentation,
   sectionCommand,
   defaultOpen,
+  forceOpen,
+  dragDisabled,
+  prefersReducedMotion,
   focusedTaskId,
   transitioningId,
   bulkMode,
@@ -378,6 +761,9 @@ const CarbonStatusSection = memo(function CarbonStatusSection({
   presentation: BoardPresentation;
   sectionCommand: { revision: number; open: boolean; scopeKey: string } | null;
   defaultOpen: boolean;
+  forceOpen: boolean;
+  dragDisabled: boolean;
+  prefersReducedMotion: boolean;
   focusedTaskId?: string;
   transitioningId?: string;
   bulkMode: boolean;
@@ -385,12 +771,13 @@ const CarbonStatusSection = memo(function CarbonStatusSection({
   onOpenTask: (task: Task) => void;
   onOpenWorker?: (actor: string) => void;
   taskHref?: (task: Task) => string;
-  onTransition: (task: Task, to: string) => void;
+  onTransition: (task: Task, to: string) => AsyncTaskActionResult;
   onTrashTask?: (task: Task) => void;
   onToggleSelection: (id: string, checked: boolean) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(() => getBoardStatusSectionOpen(storageKey, state, defaultOpen));
+  const { setNodeRef, isOver } = useDroppable({ id: state });
   useEffect(() => {
     setOpen(getBoardStatusSectionOpen(storageKey, state, defaultOpen));
   }, [defaultOpen, state, storageKey]);
@@ -402,11 +789,12 @@ const CarbonStatusSection = memo(function CarbonStatusSection({
     if (!sectionCommand || sectionCommand.scopeKey !== storageKey) return;
     changeOpen(sectionCommand.open);
   }, [changeOpen, sectionCommand, storageKey]);
+  const expanded = forceOpen || open;
   return (
-    <Collapsible open={open} onOpenChange={changeOpen} className="mb-1">
+    <Collapsible open={expanded} onOpenChange={changeOpen} className="mb-1">
       <CollapsibleTrigger asChild>
         <button type="button" className="flex h-9 w-full items-center gap-2 px-3 text-left text-[13px] hover:bg-foreground/[0.02]">
-          <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+          <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", expanded && "rotate-90")} />
           <StatusIcon status={state} closed={status.closed} initial={status.initial} className="size-3.5" />
           <span className="font-medium">{localizedStatusLabel(state, t)}</span>
           <span className="text-xs text-muted-foreground">{tasks.length}</span>
@@ -414,46 +802,174 @@ const CarbonStatusSection = memo(function CarbonStatusSection({
       </CollapsibleTrigger>
       <CollapsibleContent style={{ contentVisibility: "auto", containIntrinsicSize: "auto 32px" }}>
         {presentation === "card" ? (
-          <div className="grid gap-2 px-3 pb-2 pt-1 sm:grid-cols-2 2xl:grid-cols-3">
-            {tasks.map((task) => (
-              <CarbonTaskCard
-                key={task.id}
-                task={task}
-                status={status}
-                selected={task.id === focusedTaskId}
-                bulkMode={bulkMode}
-                bulkSelected={selectedIds?.has(task.id)}
-                transitioning={task.id === transitioningId}
-                onOpenTask={onOpenTask}
-                onOpenWorker={onOpenWorker}
-                taskHref={taskHref}
-                onTransition={onTransition}
-                onTrashTask={onTrashTask}
-                onToggleSelection={onToggleSelection}
-              />
-            ))}
-          </div>
+          <SortableContext items={tasks.map((task) => task.id)} strategy={rectSortingStrategy}>
+            <div
+              ref={setNodeRef}
+              className={cn(
+                "grid min-h-12 gap-2 px-3 pb-2 pt-1 transition-colors motion-reduce:transition-none sm:grid-cols-2 2xl:grid-cols-3",
+                isOver && "bg-brand/[0.035]",
+              )}
+            >
+              {tasks.map((task) => (
+                <SortableCarbonTask
+                  key={task.id}
+                  task={task}
+                  status={status}
+                  presentation={presentation}
+                  selected={task.id === focusedTaskId}
+                  bulkMode={bulkMode}
+                  bulkSelected={selectedIds?.has(task.id)}
+                  transitioning={task.id === transitioningId}
+                  dragDisabled={dragDisabled}
+                  prefersReducedMotion={prefersReducedMotion}
+                  onOpenTask={onOpenTask}
+                  onOpenWorker={onOpenWorker}
+                  taskHref={taskHref}
+                  onTransition={onTransition}
+                  onTrashTask={onTrashTask}
+                  onToggleSelection={onToggleSelection}
+                />
+              ))}
+            </div>
+          </SortableContext>
         ) : (
-          tasks.map((task) => (
-            <CarbonTaskRow
-              key={task.id}
-              task={task}
-              status={status}
-              selected={task.id === focusedTaskId}
-              bulkMode={bulkMode}
-              bulkSelected={selectedIds?.has(task.id)}
-              transitioning={task.id === transitioningId}
-              onOpenTask={onOpenTask}
-              onOpenWorker={onOpenWorker}
-              taskHref={taskHref}
-              onTransition={onTransition}
-              onTrashTask={onTrashTask}
-              onToggleSelection={onToggleSelection}
-            />
-          ))
+          <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+            <div
+              ref={setNodeRef}
+              className={cn(
+                "min-h-8 transition-colors motion-reduce:transition-none",
+                isOver && "bg-brand/[0.035]",
+              )}
+            >
+              {tasks.map((task) => (
+                <SortableCarbonTask
+                  key={task.id}
+                  task={task}
+                  status={status}
+                  presentation={presentation}
+                  selected={task.id === focusedTaskId}
+                  bulkMode={bulkMode}
+                  bulkSelected={selectedIds?.has(task.id)}
+                  transitioning={task.id === transitioningId}
+                  dragDisabled={dragDisabled}
+                  prefersReducedMotion={prefersReducedMotion}
+                  onOpenTask={onOpenTask}
+                  onOpenWorker={onOpenWorker}
+                  taskHref={taskHref}
+                  onTransition={onTransition}
+                  onTrashTask={onTrashTask}
+                  onToggleSelection={onToggleSelection}
+                />
+              ))}
+            </div>
+          </SortableContext>
         )}
       </CollapsibleContent>
     </Collapsible>
+  );
+});
+
+const SortableCarbonTask = memo(function SortableCarbonTask({
+  task,
+  status,
+  presentation,
+  selected,
+  bulkMode,
+  bulkSelected,
+  transitioning,
+  dragDisabled,
+  prefersReducedMotion,
+  onOpenTask,
+  onOpenWorker,
+  taskHref,
+  onTransition,
+  onTrashTask,
+  onToggleSelection,
+}: {
+  task: Task;
+  status: Status;
+  presentation: BoardPresentation;
+  selected: boolean;
+  bulkMode: boolean;
+  bulkSelected?: boolean;
+  transitioning: boolean;
+  dragDisabled: boolean;
+  prefersReducedMotion: boolean;
+  onOpenTask: (task: Task) => void;
+  onOpenWorker?: (actor: string) => void;
+  taskHref?: (task: Task) => string;
+  onTransition: (task: Task, to: string) => AsyncTaskActionResult;
+  onTrashTask?: (task: Task) => void;
+  onToggleSelection: (id: string, checked: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    disabled: dragDisabled,
+  });
+  const dragHandle = (
+    <span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+      <button
+        ref={setActivatorNodeRef}
+        type="button"
+        disabled={dragDisabled}
+        aria-label={t("Drag task {id}", "拖动任务 {id}", { id: task.id })}
+        className="grid size-4 cursor-grab place-items-center rounded text-muted-foreground/80 opacity-45 outline-none transition-opacity hover:bg-muted hover:text-foreground hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing group-hover:opacity-100 disabled:cursor-wait disabled:opacity-25 motion-reduce:transition-none"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-3" />
+      </button>
+    </span>
+  );
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: prefersReducedMotion ? undefined : transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "relative origin-center motion-safe:transition-[transform,opacity] motion-safe:duration-200 motion-safe:ease-out motion-reduce:transition-none",
+        isDragging && "pointer-events-none opacity-0",
+      )}
+    >
+      {presentation === "card" ? (
+        <CarbonTaskCard
+          task={task}
+          status={status}
+          selected={selected}
+          bulkMode={bulkMode}
+          bulkSelected={bulkSelected}
+          transitioning={transitioning}
+          dragHandle={dragHandle}
+          onOpenTask={onOpenTask}
+          onOpenWorker={onOpenWorker}
+          taskHref={taskHref}
+          onTransition={onTransition}
+          onTrashTask={onTrashTask}
+          onToggleSelection={onToggleSelection}
+        />
+      ) : (
+        <CarbonTaskRow
+          task={task}
+          status={status}
+          selected={selected}
+          bulkMode={bulkMode}
+          bulkSelected={bulkSelected}
+          transitioning={transitioning}
+          dragHandle={dragHandle}
+          onOpenTask={onOpenTask}
+          onOpenWorker={onOpenWorker}
+          taskHref={taskHref}
+          onTransition={onTransition}
+          onTrashTask={onTrashTask}
+          onToggleSelection={onToggleSelection}
+        />
+      )}
+    </div>
   );
 });
 
@@ -464,6 +980,7 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
   bulkMode,
   bulkSelected,
   transitioning,
+  dragHandle,
   onOpenTask,
   onOpenWorker,
   taskHref,
@@ -477,10 +994,11 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
   bulkMode: boolean;
   bulkSelected?: boolean;
   transitioning: boolean;
+  dragHandle?: ReactNode;
   onOpenTask: (task: Task) => void;
   onOpenWorker?: (actor: string) => void;
   taskHref?: (task: Task) => string;
-  onTransition: (task: Task, to: string) => void;
+  onTransition: (task: Task, to: string) => AsyncTaskActionResult;
   onTrashTask?: (task: Task) => void;
   onToggleSelection: (id: string, checked: boolean) => void;
 }) {
@@ -491,6 +1009,9 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
   const missingVersion = !task.version;
   const importance = carbonImportanceLabel(task.importance ?? "normal", t);
   const stop = (event: MouseEvent | PointerEvent) => event.stopPropagation();
+  const triggerTransition = (next: string) => {
+    void Promise.resolve(onTransition(task, next)).catch(() => undefined);
+  };
   const openKeyboardContextMenu = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return false;
     event.preventDefault();
@@ -512,7 +1033,7 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
       taskHref={taskHref}
       statusLabel={(value) => localizedStatusLabel(value, t)}
       onOpenTask={onOpenTask}
-      onTransition={onTransition}
+      onTransition={(_task, next) => triggerTransition(next)}
       onTrashTask={onTrashTask}
     >
       <div
@@ -533,11 +1054,12 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
         }
       }}
       className={cn(
-        "group flex h-8 w-full cursor-pointer items-center gap-2 px-3 text-left text-[13px] transition-colors hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.04] focus-visible:outline-none",
+        "group flex h-8 w-full cursor-pointer items-center gap-2 px-3 text-left text-[13px] transition-colors hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.04] focus-visible:outline-none motion-reduce:transition-none",
         selected && "bg-foreground/[0.06] ring-1 ring-inset ring-brand/40",
       )}
       style={{ contentVisibility: "auto", containIntrinsicSize: "auto 32px" }}
     >
+      {dragHandle}
       {bulkMode && (
         <Checkbox
           checked={bulkSelected}
@@ -563,7 +1085,7 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
         <DropdownMenuContent align="start" onClick={stop}>
           <DropdownMenuGroup>
             {(status.states ?? []).map((next) => (
-              <DropdownMenuItem key={next} disabled={next === task.status || transitioning} onSelect={(event) => { event.stopPropagation(); onTransition(task, next); }}>
+              <DropdownMenuItem key={next} disabled={next === task.status || transitioning} onSelect={(event) => { event.stopPropagation(); triggerTransition(next); }}>
                 <StatusIcon status={next} closed={status.closed} initial={status.initial} />
                 {localizedStatusLabel(next, t)}
               </DropdownMenuItem>
@@ -604,14 +1126,14 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label={t("Request lease", "申请认领")}
+              aria-label={t("Ask to take over", "申请接手")}
               onClick={(event) => { stop(event); onOpenTask(task); }}
               className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
             >
               <UserPlus className="size-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>{t("Open task to request a lease", "打开任务后申请租约")}</TooltipContent>
+          <TooltipContent>{t("Open the task to ask to take it over", "打开任务后即可申请接手")}</TooltipContent>
         </Tooltip>
       )}
       {onTrashTask && (
@@ -653,6 +1175,7 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
   bulkMode,
   bulkSelected,
   transitioning,
+  dragHandle,
   onOpenTask,
   onOpenWorker,
   taskHref,
@@ -666,10 +1189,11 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
   bulkMode: boolean;
   bulkSelected?: boolean;
   transitioning: boolean;
+  dragHandle?: ReactNode;
   onOpenTask: (task: Task) => void;
   onOpenWorker?: (actor: string) => void;
   taskHref?: (task: Task) => string;
-  onTransition: (task: Task, to: string) => void;
+  onTransition: (task: Task, to: string) => AsyncTaskActionResult;
   onTrashTask?: (task: Task) => void;
   onToggleSelection: (id: string, checked: boolean) => void;
 }) {
@@ -680,6 +1204,9 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
   const missingVersion = !task.version;
   const importance = carbonImportanceLabel(task.importance ?? "normal", t);
   const stop = (event: MouseEvent | PointerEvent) => event.stopPropagation();
+  const triggerTransition = (next: string) => {
+    void Promise.resolve(onTransition(task, next)).catch(() => undefined);
+  };
   const openKeyboardContextMenu = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return false;
     event.preventDefault();
@@ -702,7 +1229,7 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
       taskHref={taskHref}
       statusLabel={(value) => localizedStatusLabel(value, t)}
       onOpenTask={onOpenTask}
-      onTransition={onTransition}
+      onTransition={(_task, next) => triggerTransition(next)}
       onTrashTask={onTrashTask}
     >
       <article
@@ -723,12 +1250,13 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
           }
         }}
         className={cn(
-          "group flex min-h-40 cursor-pointer flex-col gap-3 rounded-xl border bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted/35 focus-visible:bg-muted/35 focus-visible:outline-none",
+          "group flex min-h-40 cursor-pointer flex-col gap-3 rounded-xl border bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted/35 focus-visible:bg-muted/35 focus-visible:outline-none motion-reduce:transition-none",
           selected && "ring-2 ring-brand/40",
         )}
         style={{ contentVisibility: "auto", containIntrinsicSize: "auto 160px" }}
       >
         <div className="flex min-w-0 items-center gap-2">
+          {dragHandle}
           {bulkMode && (
             <Checkbox
               checked={bulkSelected}
@@ -755,7 +1283,7 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
             <DropdownMenuContent align="start" onClick={stop}>
               <DropdownMenuGroup>
                 {(status.states ?? []).map((next) => (
-                  <DropdownMenuItem key={next} disabled={next === task.status || transitioning} onSelect={(event) => { event.stopPropagation(); onTransition(task, next); }}>
+                  <DropdownMenuItem key={next} disabled={next === task.status || transitioning} onSelect={(event) => { event.stopPropagation(); triggerTransition(next); }}>
                     <StatusIcon status={next} closed={status.closed} initial={status.initial} />
                     {localizedStatusLabel(next, t)}
                   </DropdownMenuItem>
@@ -831,7 +1359,7 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label={t("Request lease", "申请认领")}
+                  aria-label={t("Ask to take over", "申请接手")}
                   onClick={(event) => { stop(event); onOpenTask(task); }}
                   onPointerDown={stop}
                   className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
@@ -839,7 +1367,7 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
                   <UserPlus className="size-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("Open task to request a lease", "打开任务后申请租约")}</TooltipContent>
+              <TooltipContent>{t("Open the task to ask to take it over", "打开任务后即可申请接手")}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -847,6 +1375,61 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
     </CarbonTaskContextMenu>
   );
 });
+
+function CarbonTaskDragPreview({ task, presentation }: { task: Task; presentation: BoardPresentation }) {
+  return presentation === "card" ? (
+    <article className="w-[min(20rem,calc(100vw-2rem))] rotate-[0.5deg] rounded-xl border border-brand/25 bg-card p-3 shadow-lg">
+      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <GripVertical className="size-3 shrink-0" />
+        <span className="truncate font-mono">{task.id}</span>
+      </div>
+      <p className="mt-2 line-clamp-2 text-sm font-medium leading-snug">{task.title}</p>
+    </article>
+  ) : (
+    <div className="flex w-[min(42rem,calc(100vw-2rem))] items-center gap-2 rounded-md border border-brand/25 bg-card px-3 py-2 text-[13px] shadow-lg">
+      <GripVertical className="size-3 shrink-0 text-muted-foreground" />
+      <span className="w-20 shrink-0 truncate font-mono text-xs text-muted-foreground">{task.id}</span>
+      <span className="min-w-0 flex-1 truncate font-medium">{task.title}</span>
+    </div>
+  );
+}
+
+function createTaskColumns(states: readonly string[], tasks: readonly Task[]): TaskColumns {
+  const next: TaskColumns = Object.fromEntries(states.map((state) => [state, []]));
+  for (const task of tasks) (next[task.status] ??= []).push(task.id);
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  for (const list of Object.values(next)) {
+    list.sort((left, right) => compareTaskOrder(byId.get(left)!, byId.get(right)!));
+  }
+  return next;
+}
+
+function dropAfterOverItem(event: DragOverEvent | DragEndEvent, presentation: BoardPresentation): boolean {
+  if (!event.over || String(event.over.id) === String(event.active.id)) return false;
+  const translated = event.active.rect.current.translated;
+  if (!translated) return false;
+  const over = event.over.rect;
+  const activeCenterY = translated.top + translated.height / 2;
+  const overCenterY = over.top + over.height / 2;
+  if (presentation !== "card" || Math.abs(activeCenterY - overCenterY) >= over.height / 2) {
+    return activeCenterY > overCenterY;
+  }
+  return translated.left + translated.width / 2 > over.left + over.width / 2;
+}
+
+function sameTaskOrder(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function sameTaskColumns(left: TaskColumns, right: TaskColumns): boolean {
+  const leftStates = Object.keys(left);
+  const rightStates = Object.keys(right);
+  return leftStates.length === rightStates.length && leftStates.every((state) => {
+    const leftIds = left[state] ?? [];
+    const rightIds = right[state] ?? [];
+    return leftIds.length === rightIds.length && leftIds.every((id, index) => id === rightIds[index]);
+  });
+}
 
 function localizedStatusLabel(state: string, t: Translate): string {
   const normalized = state.trim().toLowerCase().replace(/[\s-]+/g, "_");

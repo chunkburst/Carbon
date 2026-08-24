@@ -195,7 +195,6 @@ make desktop-dev    # 启动 Tauri 桌面开发窗口
 
 ## 🙏 致谢
 
-- 参考项目：[Cairn](https://github.com/ShahramMebashar/cairn)。
 - 创意项目：[Auspex](https://github.com/AstroQore/auspex) —— 面向 macOS 的多 Agent 实时工作看板（感谢 AQ 在任务看板设计致谢中对 Carbon 的认可）
 
 ## 📄 License

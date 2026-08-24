@@ -35,21 +35,22 @@ func (s *Server) workLogServiceFor(w http.ResponseWriter, r *http.Request) (*mcp
 }
 
 type workLogDTO struct {
-	ID         string             `json:"id"`
-	Worker     string             `json:"worker"`
-	Visibility worklog.Visibility `json:"visibility"`
-	Standalone bool               `json:"standalone,omitempty"`
-	ClusterID  string             `json:"clusterId"`
-	ProjectID  string             `json:"projectId"`
-	TaskID     string             `json:"taskId"`
-	Title      string             `json:"title"`
-	Body       string             `json:"body"`
-	Tags       []string           `json:"tags"`
-	CreatedAt  string             `json:"createdAt"`
-	CreatedBy  string             `json:"createdBy"`
-	UpdatedAt  string             `json:"updatedAt"`
-	UpdatedBy  string             `json:"updatedBy"`
-	Version    string             `json:"version"`
+	ID           string                `json:"id"`
+	Worker       string                `json:"worker"`
+	Visibility   worklog.Visibility    `json:"visibility"`
+	Standalone   bool                  `json:"standalone,omitempty"`
+	ClusterID    string                `json:"clusterId"`
+	ProjectID    string                `json:"projectId"`
+	TaskID       string                `json:"taskId"`
+	Title        string                `json:"title"`
+	Body         string                `json:"body"`
+	Tags         []string              `json:"tags"`
+	Coordination *worklog.Coordination `json:"coordination,omitempty"`
+	CreatedAt    string                `json:"createdAt"`
+	CreatedBy    string                `json:"createdBy"`
+	UpdatedAt    string                `json:"updatedAt"`
+	UpdatedBy    string                `json:"updatedBy"`
+	Version      string                `json:"version"`
 }
 
 type workLogsResponse struct {
@@ -80,22 +81,32 @@ type workLogUpdateRequest struct {
 
 func dtoFromWorkLog(item worklog.Log) workLogDTO {
 	return workLogDTO{
-		ID:         item.ID,
-		Worker:     item.Worker,
-		Visibility: item.Visibility,
-		Standalone: item.Standalone,
-		ClusterID:  item.ClusterID,
-		ProjectID:  item.ProjectID,
-		TaskID:     item.TaskID,
-		Title:      item.Title,
-		Body:       item.Body,
-		Tags:       append([]string{}, item.Tags...),
-		CreatedAt:  item.CreatedAt,
-		CreatedBy:  item.CreatedBy,
-		UpdatedAt:  item.UpdatedAt,
-		UpdatedBy:  item.UpdatedBy,
-		Version:    item.Version,
+		ID:           item.ID,
+		Worker:       item.Worker,
+		Visibility:   item.Visibility,
+		Standalone:   item.Standalone,
+		ClusterID:    item.ClusterID,
+		ProjectID:    item.ProjectID,
+		TaskID:       item.TaskID,
+		Title:        item.Title,
+		Body:         item.Body,
+		Tags:         append([]string{}, item.Tags...),
+		Coordination: cloneWorkLogCoordination(item.Coordination),
+		CreatedAt:    item.CreatedAt,
+		CreatedBy:    item.CreatedBy,
+		UpdatedAt:    item.UpdatedAt,
+		UpdatedBy:    item.UpdatedBy,
+		Version:      item.Version,
 	}
+}
+
+func cloneWorkLogCoordination(value *worklog.Coordination) *worklog.Coordination {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.Recipients = append([]string(nil), value.Recipients...)
+	return &copy
 }
 
 func workLogDTOs(items []worklog.Log) []workLogDTO {
@@ -314,9 +325,18 @@ func writeWorkLogErr(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, errBody(err))
 	case errors.Is(err, mcp.ErrWorkLogOwnerRequired), errors.Is(err, mcp.ErrWorkLogProjectScope), errors.Is(err, mcp.ErrWorkLogClusterScope):
 		writeJSON(w, http.StatusForbidden, errBody(err))
+	case errors.Is(err, mcp.ErrIdentityModeDisabled):
+		writeJSON(w, http.StatusConflict, errBody(err))
 	case errors.Is(err, mcp.ErrWorkLogScopeRequired):
 		writeJSON(w, http.StatusBadRequest, errBody(err))
-	case errors.Is(err, mcp.ErrWorkLogExpectedVersionRequired), errors.Is(err, worklog.ErrInvalidWorkLog), errors.Is(err, worklog.ErrInvalidFilter):
+	case errors.Is(err, mcp.ErrWorkLogExpectedVersionRequired),
+		errors.Is(err, mcp.ErrIdentityDraftProjectRequired),
+		errors.Is(err, mcp.ErrIdentityDraftReservedTag),
+		errors.Is(err, mcp.ErrIdentityDraftServerOwned),
+		errors.Is(err, mcp.ErrIdentityDraftImmutable),
+		errors.Is(err, mcp.ErrIdentityDraftAgentOnly),
+		errors.Is(err, mcp.ErrInvalidIdentityDraft),
+		errors.Is(err, worklog.ErrInvalidWorkLog), errors.Is(err, worklog.ErrCoordinationImmutable), errors.Is(err, worklog.ErrInvalidFilter):
 		writeJSON(w, http.StatusUnprocessableEntity, errBody(err))
 	default:
 		writeErr(w, err)

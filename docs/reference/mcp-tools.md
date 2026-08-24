@@ -49,6 +49,8 @@ project. Use `--cluster <id>` only for an intentional shared task pool.
 - Version-protected calls accept the current raw version or quoted ETag in `expected_version` and
   reject stale writes.
 - Task creation supplies explicit `type` and `importance`; `project_id` expresses ownership.
+- Worker Identity Mode is disabled by default. When a project store enables it, typed task claims,
+  sessions, reassignment, and approval are checked against the Worker's claimed task types.
 
 ## Catalog tools
 
@@ -81,6 +83,7 @@ reference and leaves the previous selection unchanged on failure.
 | `list`, `get`, `search` | Read task summaries, a full task, or matching task content. |
 | `create`, `update`, `reorder`, `transition`, `delete` | Create and manage ordinary task state. |
 | `list_types`, `create_type` | Read or add reusable task types. |
+| `worker_identity_get`, `worker_identity_list`, `worker_identity_claim` | Read or claim a stable Worker role and one or more task types when Identity Mode is enabled. |
 | `run_checks`, `attest` | Run command checks or record a manual check result. |
 | `note`, `edit_note`, `delete_note` | Maintain concise task provenance. |
 
@@ -98,7 +101,8 @@ or assignment; use the dedicated bulk/lease operations where the change is permi
 
 `begin` requires `expected_actor` to equal `identity.actor`. `lease_claim` requires a non-empty
 reason and current `expected_version`; a conflict becomes a pending request rather than silently
-replacing a holder.
+replacing a holder. With Identity Mode enabled, an Agent must have an identity whose `types`
+contains the typed task it is about to execute. Human/system administration remains available.
 
 ## Planning, recovery, and audit
 
@@ -107,12 +111,18 @@ replacing a holder.
 | Blockers and evidence | `set_blocker`, `add_evidence`, `remove_evidence` |
 | Trash and bulk work | `trash`, `trash_many`, `list_trash`, `restore_trash`, `bulk_update`, `bulk_move` |
 | Views and templates | `list_views`, `get_view`, `create_view`, `save_view`, `delete_view`, `apply_view`, plus template create/save/delete/instantiate tools |
-| Work Logs | `worklog_create`, `worklog_get`, `worklog_list`, `worklog_update`, `worklog_delete` |
+| Work Logs | `worklog_create`, `worklog_get`, `worklog_list`, `worklog_update`, `worklog_delete`, `worklog_draft_send` |
 | Metrics | Worker and project/cluster metrics tools |
 
 Bulk writes supply expected versions for every selected task. An ownership move is explicit and
 requires the documented force/reason conditions when it changes project scope. Work Logs belong to
-an explicitly selected cluster and have server-owned identity/audit fields.
+an explicitly selected project store and have server-owned identity/audit fields.
+
+`worklog_draft_send` is available only to an Agent in a project whose Identity Mode is enabled. It
+creates a `worker_private`, append-only coordination record with a server-owned versioned envelope.
+Optional recipients are actual access controls: only the sender, addressed Agents, and local human
+administration can read a directed draft. With no recipients it is a same-project broadcast. Reply
+by sending another draft with the same `thread`; drafts cannot be updated or deleted.
 
 ## Catalog images are HTTP resources
 

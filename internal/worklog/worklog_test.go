@@ -152,6 +152,34 @@ func TestVersionPreconditions(t *testing.T) {
 	}
 }
 
+func TestCoordinationRoundTripAndImmutability(t *testing.T) {
+	m, _ := worklogManager(t)
+	draft := logDraft()
+	draft.Visibility = WorkerPrivate
+	draft.Coordination = &Coordination{
+		Version: CoordinationVersion, Recipients: []string{"agent:reviewer"}, Thread: "review_1",
+	}
+	created, err := m.Create(context.Background(), "agent:codex", draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Coordination == nil || created.Coordination.Version != CoordinationVersion || created.Coordination.Thread != "review_1" {
+		t.Fatalf("coordination round trip = %#v", created)
+	}
+	created.Coordination.Recipients[0] = "agent:mutated"
+	stored, err := m.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stored.Coordination.Recipients[0]; got != "agent:reviewer" {
+		t.Fatalf("coordination recipients alias durable state: %q", got)
+	}
+	stored.Coordination.Recipients = []string{"agent:other"}
+	if _, err := m.Update(context.Background(), "agent:codex", stored, stored.ETag()); !errors.Is(err, ErrCoordinationImmutable) {
+		t.Fatalf("coordination mutation = %v, want ErrCoordinationImmutable", err)
+	}
+}
+
 func TestValidationAndFilterBounds(t *testing.T) {
 	m, _ := worklogManager(t)
 	tooManyTags := make([]string, maxTags+1)

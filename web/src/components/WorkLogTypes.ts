@@ -6,6 +6,12 @@ export type WorkLogVisibility = CarbonWorkLogVisibility;
 export type WorkLog = CarbonWorkLog;
 
 export type WorkLogDraft = CarbonWorkLogCreate;
+export {
+  IDENTITY_DRAFT_TAG,
+  isWorkLogCoordinationDraft,
+  workLogCoordinationDraft,
+  type WorkLogCoordinationDraft,
+} from "@/lib/worklog-coordination";
 
 /**
  * A task link carries its durable source scope. `projectId: ""` is reserved for

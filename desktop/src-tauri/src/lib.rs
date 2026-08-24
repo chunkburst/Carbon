@@ -2,12 +2,16 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
@@ -24,6 +28,13 @@ const LEGACY_DESKTOP_PREFERENCES_FILE: &str = "cairn-desktop.json";
 /// The window-state plugin's default filename.  It lives in the app-config profile rather
 /// than the app-data profile used by the rest of the native preferences.
 const WINDOW_STATE_FILE: &str = ".window-state.json";
+/// The exact Windows inner-size signature observed in the clipped restore shown by the user.
+/// Keep the repair surgical: physical-pixel sizes cannot safely be generalized across displays,
+/// so legitimate ultrawide layouts (for example 1920×720) must remain untouched.
+#[cfg(target_os = "windows")]
+const CLIPPED_RESTORE_MAIN_WIDTH: f64 = 1_968.0;
+#[cfg(target_os = "windows")]
+const CLIPPED_RESTORE_MAIN_HEIGHT: f64 = 741.0;
 const DESKTOP_APP_IDENTIFIER: &str = "com.shaho.carbon";
 /// Migration-only app identifier used to locate the pre-Carbon desktop profile.
 const LEGACY_DESKTOP_APP_IDENTIFIER: &str = "com.shaho.cairn";
@@ -51,6 +62,9 @@ const ADMIN_DATA_HOME_ARG: &str = "--carbon-admin-data-home";
 
 /// Default global shortcut that pops the quick-capture window.
 const CAPTURE_SHORTCUT: &str = "CmdOrCtrl+Shift+K";
+/// Stable label for the single native picture-in-picture task board.  Keep this out of the
+/// persisted window-state cache: the scope is transient and is always supplied by the main UI.
+const FLOATING_BOARD_WINDOW_LABEL: &str = "floating-board";
 
 /// Full-page message shown if the bundled Carbon server never comes up. Self-contained
 /// so it works regardless of what the hidden webview had loaded.
@@ -63,6 +77,28 @@ struct Sidecar(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 /// The URL the bundled server bound to (from its stdout handshake). Used to open the
 /// capture window at the right origin. None in dev or before the server is up.
 struct ServerUrl(Mutex<Option<String>>);
+
+/// Only opaque catalog identifiers cross the native window boundary.  In particular, callers
+/// cannot make the shell navigate a floating webview to a filesystem path, a custom URL, or a
+/// script-bearing string.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FloatingBoardTarget {
+    cluster_id: Option<String>,
+    /// Omitted only for an explicit cluster-wide task feed.
+    project_id: Option<String>,
+    /// The workspace project that remains visible when a cluster-wide task opens in main.
+    workspace_project_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FloatingTaskTarget {
+    cluster_id: Option<String>,
+    project_id: Option<String>,
+    workspace_project_id: String,
+    task_id: String,
+}
 
 /// Whether this executable was packaged as the Windows portable ZIP. The state is captured
 /// once on startup, so deep-link registration cannot be enabled later by deleting the marker
@@ -235,13 +271,22 @@ pub fn run() {
                         // upgrade from starting because the old cache was unreadable.
                         log::warn!("could not migrate legacy Carbon window state: {error}");
                     }
+                    #[cfg(target_os = "windows")]
+                    {
+                        if let Err(error) = sanitize_main_window_state(app) {
+                            // The window-state plugin already treats an unreadable cache as
+                            // empty. Keep that behavior and never make placement cache repair
+                            // fatal to application startup.
+                            log::warn!("could not sanitize saved Carbon window state: {error}");
+                        }
+                    }
                     Ok(())
                 })
                 .build(),
         )
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(&["capture"])
+                .with_denylist(&["capture", FLOATING_BOARD_WINDOW_LABEL])
                 .build(),
         )
         .plugin(
@@ -474,7 +519,10 @@ pub fn run() {
             clear_notification_sound,
             play_notification_sound,
             get_data_home,
-            set_data_home
+            set_data_home,
+            open_floating_board,
+            close_floating_board,
+            focus_main_task
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -495,6 +543,176 @@ pub fn run() {
 #[tauri::command]
 fn is_portable(portable: tauri::State<'_, PortableMode>) -> bool {
     portable.0
+}
+
+/// Open or update the one system-level floating board.  The route is composed exclusively from
+/// validated catalog IDs and the sidecar URL captured by this process; a renderer can never turn
+/// this command into a general-purpose navigation primitive.
+#[tauri::command]
+fn open_floating_board(
+    app: tauri::AppHandle,
+    window: WebviewWindow<tauri::Wry>,
+    target: FloatingBoardTarget,
+) -> Result<(), String> {
+    require_main_window(&window)?;
+    validate_floating_board_target(&target)?;
+    let server = current_server_url(&app)?;
+    let url = floating_board_url(&app, &target)?;
+    // Do not create a second webview against a port that has only been announced but is not
+    // serving yet. A native webview remembers that blank response and will not recover by itself.
+    if !server_ready(server.as_str()) {
+        return Err("Carbon's local server is still warming up.".into());
+    }
+
+    if let Some(floating) = app.get_webview_window(FLOATING_BOARD_WINDOW_LABEL) {
+        floating
+            .navigate(url)
+            .map_err(|error| format!("Could not update Carbon's floating board: {error}"))?;
+        let _ = floating.set_always_on_top(true);
+        let _ = floating.show();
+        let _ = floating.unminimize();
+        let _ = floating.set_focus();
+        return Ok(());
+    }
+
+    // Start from the bundled `tauri.localhost` document, then redirect to the verified loopback
+    // server after the app document has painted. Loading the external URL directly can race the
+    // navigation guard during WebView2 initialization; that leaves a perfectly healthy native
+    // window with a black, never-painted surface.
+    let redirect_url = url.clone();
+    let redirected = Arc::new(AtomicBool::new(false));
+    let loaded = Arc::new(AtomicBool::new(false));
+    let redirect_once = redirected.clone();
+    let loaded_once = loaded.clone();
+    let floating = WebviewWindowBuilder::new(
+        &app,
+        FLOATING_BOARD_WINDOW_LABEL,
+        WebviewUrl::App("index.html".into()),
+    )
+    .title("Carbon · Floating task board")
+    .inner_size(560.0, 460.0)
+    .min_inner_size(360.0, 300.0)
+    .resizable(true)
+    .always_on_top(true)
+    .on_page_load(move |window, payload| {
+        if payload.event() != PageLoadEvent::Finished {
+            return;
+        }
+
+        let page_url = payload.url();
+        let is_bundled_document =
+            page_url.scheme() == "tauri" || page_url.host_str() == Some("tauri.localhost");
+        if is_bundled_document {
+            if !redirect_once.swap(true, Ordering::AcqRel) {
+                if let Err(error) = window.navigate(redirect_url.clone()) {
+                    log::warn!(
+                        "could not navigate Carbon's floating board to its local server: {error}"
+                    );
+                }
+            }
+            return;
+        }
+
+        if page_url.origin() == redirect_url.origin() {
+            loaded_once.store(true, Ordering::Release);
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    })
+    .build()
+    .map_err(|error| format!("Could not open Carbon's floating board: {error}"))?;
+
+    // Make the native surface visible immediately as a second line of defence for WebView2
+    // runtimes that ignore the builder's default visibility until their first navigation. The
+    // bundled document is already safe to show; the callback below will focus it again after the
+    // verified loopback page has painted.
+    let _ = floating.show();
+    let _ = floating.unminimize();
+    let _ = floating.set_focus();
+
+    // If a particular WebView2 runtime drops the first page-load callback, retry the verified
+    // navigation from the app handle after a short grace period. The retry is bounded and never
+    // touches the user's data or creates another native window.
+    let retry_app = app.clone();
+    let retry_url = url.clone();
+    let retry_loaded = loaded.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(900));
+        // `redirected` only means that the bundled document attempted the hand-off; the
+        // hand-off itself may still have been rejected by a transient navigation-guard race.
+        // Retry until the loopback document reports Finished, rather than treating that first
+        // attempt as success.
+        if retry_loaded.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(window) = retry_app.get_webview_window(FLOATING_BOARD_WINDOW_LABEL) {
+            // A few WebView2 builds do not deliver the first page-load callback reliably. Surface
+            // the already-created window at this bounded fallback and replay the verified
+            // navigation; the external document can then finish painting and the normal callback
+            // will keep it focused.
+            let _ = window.navigate(retry_url);
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    });
+    let event_app = app.clone();
+    floating.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            // The event is emitted only after the native window is gone, covering its X button,
+            // Escape, programmatic close, and platform title-bar close in one lifecycle signal.
+            let _ = event_app.emit("floating-board:closed", ());
+        }
+    });
+    Ok(())
+}
+
+/// Close the one native floating board from either its own controls or the main workspace. The
+/// destroyed-window listener above is the source of truth for clearing the main UI's toggle.
+#[tauri::command]
+fn close_floating_board(
+    app: tauri::AppHandle,
+    window: WebviewWindow<tauri::Wry>,
+) -> Result<bool, String> {
+    if window.label() != "main" && window.label() != FLOATING_BOARD_WINDOW_LABEL {
+        return Err(
+            "Only Carbon's main window or floating board may close the floating board.".into(),
+        );
+    }
+    let Some(floating) = app.get_webview_window(FLOATING_BOARD_WINDOW_LABEL) else {
+        return Ok(false);
+    };
+    // `destroy` bypasses any close-request handler and is intentional here: this command is the
+    // explicit escape hatch for a webview whose renderer/IPC queue is already unresponsive.
+    floating
+        .destroy()
+        .map_err(|error| format!("Could not close Carbon's floating board: {error}"))?;
+    Ok(true)
+}
+
+/// A task click in the floating webview returns to the main Carbon window through one canonical
+/// Carbon hash route.  This intentionally accepts task metadata, not a caller-provided URL.
+#[tauri::command]
+fn focus_main_task(
+    app: tauri::AppHandle,
+    window: WebviewWindow<tauri::Wry>,
+    target: FloatingTaskTarget,
+) -> Result<(), String> {
+    if window.label() != FLOATING_BOARD_WINDOW_LABEL {
+        return Err("Only Carbon's floating board may open a task in the main window.".into());
+    }
+    validate_floating_task_target(&target)?;
+    let url = main_task_url(&app, &target)?;
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Carbon's main window is unavailable.".to_string())?;
+    main.navigate(url)
+        .map_err(|error| format!("Could not open the task in Carbon's main window: {error}"))?;
+    let _ = main.show();
+    let _ = main.unminimize();
+    let _ = main.set_focus();
+    Ok(())
 }
 
 fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -573,6 +791,213 @@ fn migrate_legacy_window_state(app: &tauri::AppHandle) -> Result<(), String> {
         destination.display()
     );
     Ok(())
+}
+
+/// Clear only a known-bad restored `main` entry before `tauri-plugin-window-state` reads its
+/// cache. A minimized/restored Windows window can occasionally persist a very wide, short
+/// geometry that leaves the desktop UI visibly clipped on every later launch. Removing that
+/// one entry lets the configured 1280×832 default take over while retaining any other windows
+/// and future plugin metadata in the same cache.
+#[cfg(target_os = "windows")]
+fn sanitize_main_window_state(app: &tauri::AppHandle) -> Result<(), String> {
+    let profile = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Could not resolve Carbon app-config directory: {error}"))?;
+    let path = profile.join(WINDOW_STATE_FILE);
+
+    if sanitize_window_state_cache_file(&path)? {
+        log::warn!(
+            "removed an abnormal restored main-window geometry from {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// Read and conditionally rewrite the cache only after it successfully parses. In particular,
+/// a corrupt cache is deliberately left intact: the window-state plugin will keep its existing
+/// tolerant fallback and the original file remains available for diagnosis.
+#[cfg(target_os = "windows")]
+fn sanitize_window_state_cache_file(path: &Path) -> Result<bool, String> {
+    let contents = match fs::read(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(format!(
+                "Could not read Carbon window state at {}: {error}",
+                path.display()
+            ));
+        }
+    };
+    let Some(sanitized) = sanitize_window_state_contents(&contents).map_err(|error| {
+        format!(
+            "Could not parse Carbon window state at {}: {error}",
+            path.display()
+        )
+    })?
+    else {
+        return Ok(false);
+    };
+
+    replace_window_state_atomically(path, &sanitized)?;
+    Ok(true)
+}
+
+/// Replace the cache only after a same-directory temporary file is fully written. Windows'
+/// `ReplaceFileW` keeps readers from observing a truncated JSON document if the process exits
+/// during this one-time repair.
+#[cfg(target_os = "windows")]
+fn replace_window_state_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+    use std::fs::OpenOptions;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null;
+
+    use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH};
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Window-state path has no parent: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("window-state");
+    let mut temporary = None;
+
+    for attempt in 0..16 {
+        let candidate = parent.join(format!(
+            ".{file_name}.carbon-repair-{}-{attempt}.tmp",
+            std::process::id()
+        ));
+        match OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(contents) {
+                    drop(file);
+                    let _ = fs::remove_file(&candidate);
+                    return Err(format!(
+                        "Could not write repaired Carbon window state at {}: {error}",
+                        candidate.display()
+                    ));
+                }
+                if let Err(error) = file.sync_all() {
+                    drop(file);
+                    let _ = fs::remove_file(&candidate);
+                    return Err(format!(
+                        "Could not flush repaired Carbon window state at {}: {error}",
+                        candidate.display()
+                    ));
+                }
+                drop(file);
+                temporary = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Could not create a temporary Carbon window-state file beside {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
+    let temporary = temporary.ok_or_else(|| {
+        format!(
+            "Could not reserve a temporary Carbon window-state file beside {}",
+            path.display()
+        )
+    })?;
+    let destination_wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let temporary_wide = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        ReplaceFileW(
+            destination_wide.as_ptr(),
+            temporary_wide.as_ptr(),
+            null(),
+            REPLACEFILE_WRITE_THROUGH,
+            null(),
+            null(),
+        )
+    };
+    if replaced == 0 {
+        let error = std::io::Error::last_os_error();
+        let _ = fs::remove_file(&temporary);
+        return Err(format!(
+            "Could not atomically update Carbon window state at {}: {error}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Pure cache transformation used before native window-state initialization. `None` means the
+/// parsed cache is safe to leave byte-for-byte untouched.
+#[cfg(target_os = "windows")]
+fn sanitize_window_state_contents(contents: &[u8]) -> Result<Option<Vec<u8>>, serde_json::Error> {
+    let mut cache = serde_json::from_slice::<serde_json::Value>(contents)?;
+    if !remove_abnormal_main_window_state(&mut cache) {
+        return Ok(None);
+    }
+    serde_json::to_vec_pretty(&cache).map(Some)
+}
+
+#[cfg(target_os = "windows")]
+fn remove_abnormal_main_window_state(cache: &mut serde_json::Value) -> bool {
+    let Some(windows) = cache.as_object_mut() else {
+        return false;
+    };
+    let Some(main_value) = windows.get("main") else {
+        return false;
+    };
+    let Some(main) = main_value.as_object() else {
+        // The plugin expects a map of window labels to complete state objects. An invalid main
+        // entry can otherwise make it discard the whole cache, so reset only that entry.
+        windows.remove("main");
+        return true;
+    };
+
+    let width = valid_window_state_dimension(main.get("width"));
+    let height = valid_window_state_dimension(main.get("height"));
+    let (Some(width), Some(height)) = (width, height) else {
+        // Zero, non-finite, non-integral, or out-of-range dimensions are never valid plugin
+        // state. Reset them even if the window was last maximized or fullscreen.
+        windows.remove("main");
+        return true;
+    };
+
+    // Be conservative around an incomplete or future plugin format. The current plugin writes
+    // both flags, so only an explicitly restored (not maximized/fullscreen) window qualifies.
+    if main.get("maximized").and_then(serde_json::Value::as_bool) != Some(false)
+        || main.get("fullscreen").and_then(serde_json::Value::as_bool) != Some(false)
+    {
+        return false;
+    }
+
+    if width == CLIPPED_RESTORE_MAIN_WIDTH && height == CLIPPED_RESTORE_MAIN_HEIGHT {
+        windows.remove("main");
+        return true;
+    }
+    false
+}
+
+/// The plugin stores physical `u32` dimensions. Do not infer intent from malformed values.
+#[cfg(target_os = "windows")]
+fn valid_window_state_dimension(value: Option<&serde_json::Value>) -> Option<f64> {
+    let value = value?.as_f64()?;
+    (value.is_finite() && value > 0.0 && value <= f64::from(u32::MAX) && value.fract() == 0.0)
+        .then_some(value)
 }
 
 fn load_desktop_preferences(app: &tauri::AppHandle) -> Result<DesktopPreferences, String> {
@@ -1679,6 +2104,141 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
+fn require_main_window(window: &WebviewWindow<tauri::Wry>) -> Result<(), String> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err("Only Carbon's main window may open the floating board.".into())
+    }
+}
+
+/// Catalog and task IDs are opaque server identifiers, not user-entered paths.  Keep their
+/// grammar deliberately tiny because these values are embedded into a hash route by the native
+/// shell.  The frontend validates the same grammar before invoke; this check is the authority.
+fn is_safe_floating_metadata(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() || bytes.len() > 160 || !bytes[0].is_ascii_alphanumeric() {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'.' | b'_' | b'-' | b':'))
+}
+
+fn validate_floating_board_target(target: &FloatingBoardTarget) -> Result<(), String> {
+    if !is_safe_floating_metadata(&target.workspace_project_id) {
+        return Err("Floating board workspace project metadata is invalid.".into());
+    }
+    if let Some(cluster_id) = target.cluster_id.as_deref() {
+        if !is_safe_floating_metadata(cluster_id) {
+            return Err("Floating board cluster metadata is invalid.".into());
+        }
+    }
+    match target.project_id.as_deref() {
+        Some(project_id) if !is_safe_floating_metadata(project_id) => {
+            return Err("Floating board project metadata is invalid.".into())
+        }
+        // A project feed is always tied to its workspace chrome. Letting them differ would make
+        // a task click reopen another project than the one that supplied the task data.
+        Some(project_id) if project_id != target.workspace_project_id => {
+            return Err("Floating board project metadata does not match its workspace.".into())
+        }
+        None if target.cluster_id.is_none() => {
+            return Err("A floating board needs a project or cluster scope.".into())
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_floating_task_target(target: &FloatingTaskTarget) -> Result<(), String> {
+    validate_floating_board_target(&FloatingBoardTarget {
+        cluster_id: target.cluster_id.clone(),
+        project_id: target.project_id.clone(),
+        workspace_project_id: target.workspace_project_id.clone(),
+    })?;
+    if !is_safe_floating_metadata(&target.task_id) {
+        return Err("Floating board task metadata is invalid.".into());
+    }
+    Ok(())
+}
+
+fn floating_board_fragment(target: &FloatingBoardTarget) -> String {
+    let mut query = format!("workspace={}", target.workspace_project_id);
+    if let Some(cluster_id) = target.cluster_id.as_deref() {
+        query.push_str(&format!("&cluster={cluster_id}"));
+    }
+    if let Some(project_id) = target.project_id.as_deref() {
+        query.push_str(&format!("&project={project_id}"));
+    }
+    format!("floating-board?{query}")
+}
+
+fn main_task_fragment(target: &FloatingTaskTarget) -> String {
+    match (target.cluster_id.as_deref(), target.project_id.as_deref()) {
+        // A cluster feed is intentionally reopened with its cluster scope. The workspace project
+        // supplies surrounding chrome; task lookup itself remains within the selected cluster.
+        (Some(cluster_id), None) => format!(
+            "carbon/{cluster_id}/{}/task/{}?taskScope=cluster",
+            target.workspace_project_id, target.task_id
+        ),
+        (Some(cluster_id), Some(_)) => format!(
+            "carbon/{cluster_id}/{}/task/{}",
+            target.workspace_project_id, target.task_id
+        ),
+        (None, Some(_)) => format!(
+            "carbon/project/{}/task/{}",
+            target.workspace_project_id, target.task_id
+        ),
+        // validate_floating_task_target rejects this before route construction. Preserve a
+        // harmless fragment for exhaustive matching if this helper is reused in tests.
+        (None, None) => "carbon".to_string(),
+    }
+}
+
+/// The sidecar emits this endpoint over stdout.  Still validate it at the command boundary so
+/// only the exact loopback HTTP endpoint can be used to construct a second webview URL.
+fn current_server_url(app: &tauri::AppHandle) -> Result<tauri::Url, String> {
+    let value = app
+        .state::<ServerUrl>()
+        .0
+        .lock()
+        .map_err(|_| "Carbon's local server state is unavailable.".to_string())?
+        .clone()
+        .ok_or_else(|| "Carbon's local server is still starting.".to_string())?;
+    let url = tauri::Url::parse(&value)
+        .map_err(|_| "Carbon's local server endpoint is invalid.".to_string())?;
+    if url.scheme() != "http"
+        || url.host_str() != Some("127.0.0.1")
+        || url.port().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("Carbon's local server endpoint is not trusted.".into());
+    }
+    Ok(url)
+}
+
+fn floating_board_url(
+    app: &tauri::AppHandle,
+    target: &FloatingBoardTarget,
+) -> Result<tauri::Url, String> {
+    let mut url = current_server_url(app)?;
+    url.set_path("/");
+    url.set_query(None);
+    url.set_fragment(Some(&floating_board_fragment(target)));
+    Ok(url)
+}
+
+fn main_task_url(
+    app: &tauri::AppHandle,
+    target: &FloatingTaskTarget,
+) -> Result<tauri::Url, String> {
+    let mut url = current_server_url(app)?;
+    url.set_fragment(Some(&main_task_fragment(target)));
+    Ok(url)
+}
+
 /// Open (or focus) the quick-capture window at the running server's `#capture` route.
 /// Falls back to showing the main window when the server URL isn't known yet (dev).
 fn open_capture(app: &tauri::AppHandle) {
@@ -1780,9 +2340,28 @@ fn finish_startup(handle: &tauri::AppHandle, url: &str) {
 /// Verified readiness probe: a bare TCP connect only proves the port is busy, so we
 /// send a real `GET /healthz` and require Carbon's `ok` body before navigating.
 fn server_ready(url: &str) -> bool {
-    let authority = url.trim_start_matches("http://");
+    // Parse the endpoint as a URL instead of treating the raw string as a SocketAddr.  `Url`
+    // normalizes an origin such as `http://127.0.0.1:2525` to include a trailing `/`; parsing
+    // `127.0.0.1:2525/` directly would fail and make every floating-window open look unready.
+    let parsed = match tauri::Url::parse(url) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    if parsed.scheme() != "http" {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    if host != "127.0.0.1" {
+        return false;
+    }
+    let Some(port) = parsed.port() else {
+        return false;
+    };
+    let authority = format!("{host}:{port}");
     let addr: SocketAddr = match authority.parse() {
-        Ok(a) => a,
+        Ok(value) => value,
         Err(_) => return false,
     };
     let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(300)) {
@@ -1894,6 +2473,7 @@ mod windows_autostart {
     use std::mem::{size_of, zeroed};
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::os::windows::fs::MetadataExt;
+    use std::os::windows::process::CommandExt;
     use std::path::{Component, Path, PathBuf};
     use std::process::Command;
     use std::ptr::{null, null_mut};
@@ -1915,7 +2495,7 @@ mod windows_autostart {
     use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
     use windows_sys::Win32::System::Threading::{
         CreateMutexW, GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, ReleaseMutex,
-        WaitForSingleObject, INFINITE,
+        WaitForSingleObject, CREATE_NO_WINDOW, INFINITE,
     };
     use windows_sys::Win32::UI::Shell::{
         CommandLineToArgvW, ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
@@ -2640,7 +3220,14 @@ mod windows_autostart {
         if !scheduler.is_file() {
             return Err("Windows 任务计划程序 schtasks.exe 不存在。".to_string());
         }
-        Ok(Command::new(scheduler))
+        // `schtasks.exe` is consulted whenever Settings reads the login-start mode. Without
+        // this creation flag, Windows can briefly show a console window for that background
+        // query even though Carbon is a GUI app. This only affects the scheduler child; the
+        // administrator helper still uses ShellExecuteExW with `runas`, so its UAC flow remains
+        // explicit and unchanged.
+        let mut command = Command::new(scheduler);
+        command.creation_flags(CREATE_NO_WINDOW);
+        Ok(command)
     }
 
     fn run_elevated_helper(mode: AutostartMode, data_home: Option<&Path>) -> Result<(), String> {
@@ -3164,16 +3751,84 @@ mod tests {
     };
     use super::{
         data_home_change_is_allowed, data_home_status_from_paths, desktop_preferences_for_launch,
-        has_background_arg, is_safe_local_path, is_supported_deep_link, legacy_app_data_dir,
-        locked_data_home_status, normalize_data_home, parse_url, quote_windows_argument,
-        AutostartMode, DesktopPreferences, BACKGROUND_ARG,
+        floating_board_fragment, has_background_arg, is_safe_floating_metadata, is_safe_local_path,
+        is_supported_deep_link, legacy_app_data_dir, locked_data_home_status, main_task_fragment,
+        normalize_data_home, parse_url, quote_windows_argument, validate_floating_board_target,
+        validate_floating_task_target, AutostartMode, DesktopPreferences, FloatingBoardTarget,
+        FloatingTaskTarget, BACKGROUND_ARG,
     };
     #[cfg(target_os = "windows")]
-    use super::{locked_admin_data_home_from_args, portable_local_drive_path, ADMIN_DATA_HOME_ARG};
+    use super::{
+        locked_admin_data_home_from_args, portable_local_drive_path,
+        sanitize_window_state_cache_file, sanitize_window_state_contents, ADMIN_DATA_HOME_ARG,
+    };
     use std::cell::Cell;
-    #[cfg(target_os = "windows")]
     use std::fs;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn floating_window_routes_accept_only_opaque_metadata() {
+        let target = FloatingBoardTarget {
+            cluster_id: Some("studio_2026".into()),
+            project_id: Some("project-01H7X".into()),
+            workspace_project_id: "project-01H7X".into(),
+        };
+        assert!(validate_floating_board_target(&target).is_ok());
+        assert_eq!(
+            floating_board_fragment(&target),
+            "floating-board?workspace=project-01H7X&cluster=studio_2026&project=project-01H7X"
+        );
+
+        for unsafe_value in [
+            "../outside",
+            "https://example.test",
+            "task?script=1",
+            "a b",
+            "",
+        ] {
+            assert!(!is_safe_floating_metadata(unsafe_value));
+            assert!(validate_floating_board_target(&FloatingBoardTarget {
+                cluster_id: None,
+                project_id: Some(unsafe_value.into()),
+                workspace_project_id: unsafe_value.into(),
+            })
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn floating_task_route_is_canonical_and_rejects_route_injection() {
+        let target = FloatingTaskTarget {
+            cluster_id: None,
+            project_id: Some("proj_7".into()),
+            workspace_project_id: "proj_7".into(),
+            task_id: "CARBON-42".into(),
+        };
+        assert!(validate_floating_task_target(&target).is_ok());
+        assert_eq!(
+            main_task_fragment(&target),
+            "carbon/project/proj_7/task/CARBON-42"
+        );
+        assert!(validate_floating_task_target(&FloatingTaskTarget {
+            cluster_id: Some("cluster/escape".into()),
+            project_id: Some("proj_7".into()),
+            workspace_project_id: "proj_7".into(),
+            task_id: "CARBON-42".into(),
+        })
+        .is_err());
+
+        let cluster_target = FloatingTaskTarget {
+            cluster_id: Some("studio_2026".into()),
+            project_id: None,
+            workspace_project_id: "proj_7".into(),
+            task_id: "CARBON-42".into(),
+        };
+        assert!(validate_floating_task_target(&cluster_target).is_ok());
+        assert_eq!(
+            main_task_fragment(&cluster_target),
+            "carbon/studio_2026/proj_7/task/CARBON-42?taskScope=cluster"
+        );
+    }
 
     #[test]
     fn quotes_windows_executable_paths_with_spaces() {
@@ -3228,6 +3883,132 @@ mod tests {
             Some(PathBuf::from("/data/com.shaho.cairn"))
         );
         assert_eq!(legacy_app_data_dir(Path::new("/data/custom")), None);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn removes_only_the_clipped_restored_main_window_state() {
+        let original = serde_json::json!({
+            "main": {
+                "width": 1968,
+                "height": 741,
+                "x": 461,
+                "y": 156,
+                "maximized": false,
+                "fullscreen": false
+            },
+            "capture": {
+                "width": 420,
+                "height": 520,
+                "maximized": false,
+                "fullscreen": false
+            },
+            "futurePluginMetadata": { "version": 3 }
+        });
+
+        let sanitized = sanitize_window_state_contents(&serde_json::to_vec(&original).unwrap())
+            .unwrap()
+            .expect("the screenshot-sized main window must be reset");
+        let cache: serde_json::Value = serde_json::from_slice(&sanitized).unwrap();
+
+        assert!(cache.get("main").is_none());
+        assert_eq!(cache["capture"], original["capture"]);
+        assert_eq!(
+            cache["futurePluginMetadata"],
+            original["futurePluginMetadata"]
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn preserves_normal_restored_main_window_sizes() {
+        for (width, height) in [
+            (1280, 832),
+            (880, 600),
+            (1920, 720),
+            (1920, 800),
+            (1960, 740),
+            (1984, 754),
+            (2952, 1112),
+        ] {
+            let cache = serde_json::json!({
+                "main": {
+                    "width": width,
+                    "height": height,
+                    "maximized": false,
+                    "fullscreen": false
+                }
+            });
+            assert!(
+                sanitize_window_state_contents(&serde_json::to_vec(&cache).unwrap())
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn preserves_wide_main_window_state_when_maximized_or_fullscreen() {
+        for (maximized, fullscreen) in [(true, false), (false, true)] {
+            let cache = serde_json::json!({
+                "main": {
+                    "width": 1968,
+                    "height": 741,
+                    "maximized": maximized,
+                    "fullscreen": fullscreen
+                }
+            });
+            assert!(
+                sanitize_window_state_contents(&serde_json::to_vec(&cache).unwrap())
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn removes_main_window_state_with_invalid_dimensions() {
+        let invalid_caches = [
+            serde_json::json!({
+                "main": { "width": 0, "height": 741, "maximized": false, "fullscreen": false }
+            }),
+            serde_json::json!({
+                "main": { "width": 1968, "height": 0, "maximized": true, "fullscreen": false }
+            }),
+            serde_json::json!({
+                "main": { "width": "1968", "height": 741, "maximized": false, "fullscreen": false }
+            }),
+        ];
+
+        for cache in invalid_caches {
+            let sanitized = sanitize_window_state_contents(&serde_json::to_vec(&cache).unwrap())
+                .unwrap()
+                .expect("invalid dimensions must reset only the main entry");
+            let sanitized: serde_json::Value = serde_json::from_slice(&sanitized).unwrap();
+            assert!(sanitized.get("main").is_none());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn corrupt_window_state_cache_is_not_overwritten_by_the_sanitizer() {
+        let path = std::env::temp_dir().join(format!(
+            "carbon-window-state-test-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let original = br#"{ definitely not JSON"#;
+        fs::write(&path, original).unwrap();
+
+        assert!(sanitize_window_state_cache_file(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original.to_vec());
+
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

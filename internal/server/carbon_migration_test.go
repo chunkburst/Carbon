@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -165,13 +166,51 @@ func TestCarbonConfigExposesAndValidatesTrashRetention(t *testing.T) {
 	if before.TrashRetentionDays != 30 {
 		t.Fatalf("default retention = %d, want 30", before.TrashRetentionDays)
 	}
+	if before.IdentityMode {
+		t.Fatalf("identity mode default = true, want false")
+	}
 	var changed configResp
 	call(t, h, http.MethodPost, "/api/config", `{"trashRetentionDays":14}`, &changed)
 	if changed.TrashRetentionDays != 14 {
 		t.Fatalf("changed retention = %d, want 14", changed.TrashRetentionDays)
 	}
+	var identityChanged configResp
+	call(t, h, http.MethodPost, "/api/config", `{"identityMode":true}`, &identityChanged)
+	if !identityChanged.IdentityMode {
+		t.Fatalf("identity mode toggle = %#v", identityChanged)
+	}
 	if code, body := raw(h, http.MethodPost, "/api/config", `{"trashRetentionDays":0}`); code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid retention = %d %s, want 422", code, body)
+	}
+}
+
+func TestIdentityModeConfigAllowsStandaloneButRejectsClusterProjectScope(t *testing.T) {
+	homeRoot := t.TempDir()
+	if _, err := home.Ensure(homeRoot); err != nil {
+		t.Fatal(err)
+	}
+	standalone, err := home.AddStandaloneProject(homeRoot, home.AddProjectRequest{Name: "Solo", SourcePath: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, err := home.CreateCluster(homeRoot, home.CreateClusterRequest{Name: "Shared", Prefix: "SHR"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := home.AddProject(homeRoot, cluster.ID, home.AddProjectRequest{Name: "Member", SourcePath: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewWithScope("human:test", ScopeDefaults{Home: homeRoot, HomeByDefault: true}).Handler()
+	standaloneQuery := url.Values{"home": {homeRoot}, "project": {standalone.ID}}.Encode()
+	var changed configResp
+	call(t, h, http.MethodPost, "/api/config?"+standaloneQuery, `{"identityMode":true}`, &changed)
+	if !changed.IdentityMode || !changed.Scope.Standalone {
+		t.Fatalf("standalone identity config = %#v", changed)
+	}
+	clusterProjectQuery := url.Values{"home": {homeRoot}, "cluster": {cluster.ID}, "project": {member.ID}}.Encode()
+	if code, body := raw(h, http.MethodPost, "/api/config?"+clusterProjectQuery, `{"identityMode":true}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("cluster project config mutation = %d %s, want 422", code, body)
 	}
 }
 

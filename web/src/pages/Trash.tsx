@@ -140,8 +140,8 @@ export function Trash({
       <div className="min-w-0 flex-1 overflow-y-auto p-4">
         {!available && !trash.isLoading && (
           <Alert>
-            <AlertTitle>{t("Trash needs Carbon stable v2", "回收站需要 Carbon stable v2")}</AlertTitle>
-            <AlertDescription>{t("This sidecar still exposes permanent legacy deletes only. No local shadow trash is created.", "当前 sidecar 仍只提供永久旧版删除；不会创建本地影子回收站。")}</AlertDescription>
+            <AlertTitle>{t("Trash is not available yet", "回收站暂不可用")}</AlertTitle>
+            <AlertDescription>{t("Update Carbon before deleting here. This version will not pretend a permanent delete can be restored.", "请先更新 Carbon 再从这里删除；当前版本不会把永久删除伪装成可恢复操作。")}</AlertDescription>
           </Alert>
         )}
         {trash.isLoading ? (

@@ -128,8 +128,8 @@ export function BackupSettings({ home }: { home: string }) {
         <CardContent className="space-y-4">
           {!available && !configQuery.isLoading && (
             <Alert>
-              <AlertTitle>{t("Backup API not available", "备份 API 不可用")}</AlertTitle>
-              <AlertDescription>{t("This server does not advertise the Carbon backup API.", "此服务端未声明 Carbon 备份 API。")}</AlertDescription>
+              <AlertTitle>{t("Backups are not available in this Carbon version", "当前 Carbon 版本暂不支持备份")}</AlertTitle>
+              <AlertDescription>{t("Update Carbon and try again.", "请更新 Carbon 后重试。")}</AlertDescription>
             </Alert>
           )}
           <Alert>
@@ -198,7 +198,7 @@ export function BackupSettings({ home }: { home: string }) {
                 <Input id="backup-region" value={config.profile.region ?? ""} disabled={!available} onChange={(event) => updateProfile({ region: event.target.value })} />
               </Field>
               <Field>
-                <FieldLabel htmlFor="backup-endpoint">Endpoint</FieldLabel>
+                <FieldLabel htmlFor="backup-endpoint">{t("Service address", "服务地址")}</FieldLabel>
                 <Input id="backup-endpoint" value={config.profile.endpoint ?? ""} disabled={!available} onChange={(event) => updateProfile({ endpoint: event.target.value })} placeholder="https://…" />
               </Field>
               <Field>
@@ -225,7 +225,7 @@ export function BackupSettings({ home }: { home: string }) {
               <Switch checked={config.profile.usePathStyle === true} disabled={!available} onCheckedChange={(usePathStyle) => updateProfile({ usePathStyle })} />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-              <div><p className="text-sm font-medium">{t("Allow insecure endpoint", "允许不安全 Endpoint")}</p><p className="text-xs text-muted-foreground">{t("Use only for a trusted local test endpoint.", "仅用于可信的本地测试 Endpoint。")}</p></div>
+              <div><p className="text-sm font-medium">{t("Allow an insecure address", "允许使用不安全地址")}</p><p className="text-xs text-muted-foreground">{t("Use this only with a trusted local test service.", "仅用于可信的本地测试服务。")}</p></div>
               <Switch checked={config.profile.allowInsecureEndpoint === true} disabled={!available} onCheckedChange={(allowInsecureEndpoint) => updateProfile({ allowInsecureEndpoint })} />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">

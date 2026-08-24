@@ -99,6 +99,7 @@ import {
 } from "@/lib/queries";
 import { carbonStorageKey } from "@/lib/storage-identity";
 import { carbonImportanceLabel, carbonTaskTypeLabel } from "@/lib/task-labels";
+import { activityAction, activityBadgeClass, isActivityNote } from "@/lib/activity";
 import { cn, timeAgo } from "@/lib/utils";
 import { useWorkerAliasFormatter } from "@/lib/worker-aliases";
 
@@ -532,7 +533,7 @@ export function CarbonTaskDetailPage({
       {missingVersion && (
         <Alert className="m-3 shrink-0">
           <AlertTitle>{t("Refresh required", "需要刷新")}</AlertTitle>
-          <AlertDescription>{t("This task has no version token, so audited edits are disabled until it is refreshed.", "该任务没有版本令牌；请刷新后再执行需要审计的编辑。")}</AlertDescription>
+          <AlertDescription>{t("This task has changed since it was loaded. Refresh it before editing.", "任务状态已发生变化，请刷新后再编辑。")}</AlertDescription>
         </Alert>
       )}
       <ResizablePanelGroup
@@ -715,7 +716,7 @@ export function CarbonTaskDetailPage({
               {(task.evidence ?? []).length > 0 && (
                 <TaskEvidenceTimeline
                   evidence={task.evidence ?? []}
-                  title={t("Evidence", "证明 / Evidence")}
+                  title={t("Delivery records", "交付凭据")}
                   onEdit={() => setCarbonExtensionOpen(true)}
                   editLabel={t("Edit", "编辑")}
                   formatWorker={formatWorker}
@@ -723,7 +724,7 @@ export function CarbonTaskDetailPage({
               )}
 
               <section className="mt-10 border-t pt-5">
-                <h2 className="text-xs font-medium text-muted-foreground">{t("Activity", "动态")}</h2>
+                <h2 className="text-sm font-medium text-muted-foreground">{t("Activity", "动态")}</h2>
                 <TaskActivityTimeline
                   entries={task.provenance ?? []}
                   onOpenWorker={onOpenWorker}
@@ -825,7 +826,7 @@ export function CarbonTaskDetailPage({
               {task.ready ? (
                 <Badge className="bg-brand text-brand-foreground">{t("Ready", "已就绪")}</Badge>
               ) : (
-                <Badge variant="outline">{t("Blocked by deps", "被依赖阻塞")}</Badge>
+                <Badge variant="outline">{t("Waiting for prerequisite tasks", "等待前置任务")}</Badge>
               )}
             </Prop>
 
@@ -1053,7 +1054,7 @@ export function CarbonTaskDetailPage({
               </section>
 
               <section className="mt-5 border-t pt-4">
-                <h3 className="text-sm font-medium">{t("Lease ownership", "租约所有权")}</h3>
+                <h3 className="text-sm font-medium">{t("Handoff and owner", "接手与负责人")}</h3>
                 <div className="mt-3">
                   <LeaseEditor
                     taskId={task.id}
@@ -1367,9 +1368,9 @@ function TaskCodeContext({
             </div>
             {(context.headStarted || context.headFinished || context.currentHead) && (
               <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                {context.headStarted && <span>start <span className="font-mono text-foreground">{shortSha(context.headStarted)}</span></span>}
-                {context.headFinished && <span>finish <span className="font-mono text-foreground">{shortSha(context.headFinished)}</span></span>}
-                {!context.headFinished && context.currentHead && <span>current <span className="font-mono text-foreground">{shortSha(context.currentHead)}</span></span>}
+                {context.headStarted && <span>{t("Started at", "开始提交")} <span className="font-mono text-foreground">{shortSha(context.headStarted)}</span></span>}
+                {context.headFinished && <span>{t("Finished at", "完成提交")} <span className="font-mono text-foreground">{shortSha(context.headFinished)}</span></span>}
+                {!context.headFinished && context.currentHead && <span>{t("Current", "当前提交")} <span className="font-mono text-foreground">{shortSha(context.currentHead)}</span></span>}
               </p>
             )}
             {!context.available ? (
@@ -1464,7 +1465,8 @@ function TaskActivityEntry({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const text = entry.text?.trim();
-  const isNote = entry.did.trim().toLowerCase() === "note";
+  const action = activityAction(entry.did, t);
+  const isNote = isActivityNote(entry.did);
   const preview = text?.split("\n").find((line) => line.trim()) ?? "";
 
   const startEditing = () => {
@@ -1479,18 +1481,24 @@ function TaskActivityEntry({
   };
 
   return (
-    <li className="group relative pb-5 pl-5 text-xs last:pb-0">
+    <li className="group relative pb-5 pl-5 text-sm last:pb-0">
       <span className="absolute -left-[5px] top-1.5 size-2 rounded-full border border-border bg-background" aria-hidden="true" />
       <div className="flex min-w-0 items-center gap-2">
         <Assignee actor={entry.who} onOpenWorker={onOpenWorker} />
         <button type="button" className="min-w-0 truncate font-medium text-left hover:underline hover:underline-offset-4" onClick={() => onOpenWorker?.(entry.who)}>{formatWorker(entry.who)}</button>
-        <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">{entry.did}</Badge>
-        {entry.editedAt && <span className="text-[11px] text-muted-foreground">{t("edited", "已编辑")}</span>}
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(entry.at)}</span>
+        <Badge
+          variant="outline"
+          title={action.label}
+          className={cn("h-6 max-w-56 truncate px-2 text-xs font-medium", activityBadgeClass(action.tone))}
+        >
+          {action.label}
+        </Badge>
+        {entry.editedAt && <span className="text-xs text-muted-foreground">{t("edited", "已编辑")}</span>}
+        <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{timeAgo(entry.at)}</span>
       </div>
       {text && !editing && (
         <div className="mt-1 flex min-w-0 items-start gap-1">
-          <button type="button" className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground hover:text-foreground" onClick={() => setOpen((value) => !value)}>
+          <button type="button" className="min-w-0 flex-1 truncate text-left text-sm leading-6 text-muted-foreground hover:text-foreground" onClick={() => setOpen((value) => !value)}>
             {open ? t("Hide note", "收起备注") : preview}
           </button>
           {isNote && (
@@ -1665,6 +1673,7 @@ function CheckRow({
   onAttest: (pass: boolean) => void;
   attesting: boolean;
 }) {
+  const { t } = useI18n();
   const isManual = !check.cmd;
   const pending = (check.result ?? "pending") === "pending";
   const meta = checkStatus(check.result, running && !isManual);
@@ -1686,7 +1695,7 @@ function CheckRow({
             variant="ghost"
             size="icon"
             className="size-6 text-success"
-            aria-label="Attest pass"
+            aria-label={t("Mark check as passed", "标记检查通过")}
             disabled={attesting}
             onClick={() => onAttest(true)}
           >
@@ -1696,7 +1705,7 @@ function CheckRow({
             variant="ghost"
             size="icon"
             className="size-6 text-destructive"
-            aria-label="Attest fail"
+            aria-label={t("Mark check as failed", "标记检查失败")}
             disabled={attesting}
             onClick={() => onAttest(false)}
           >
@@ -1712,7 +1721,10 @@ function CheckRow({
       <Collapsible>
         <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-foreground/[0.03]">
           {lead}
-          <StatusPill className={meta.pill}>{meta.label}</StatusPill>
+          <StatusPill className={meta.pill}>{t(
+            meta.label === "running" ? "Running" : meta.label === "pass" ? "Passed" : meta.label === "fail" ? "Failed" : "Pending",
+            meta.label === "running" ? "检查中" : meta.label === "pass" ? "已通过" : meta.label === "fail" ? "未通过" : "待检查",
+          )}</StatusPill>
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -1727,7 +1739,10 @@ function CheckRow({
   return (
     <div className="flex items-center gap-2 px-3 py-2">
       {lead}
-      <StatusPill className={meta.pill}>{meta.label}</StatusPill>
+      <StatusPill className={meta.pill}>{t(
+        meta.label === "running" ? "Running" : meta.label === "pass" ? "Passed" : meta.label === "fail" ? "Failed" : "Pending",
+        meta.label === "running" ? "检查中" : meta.label === "pass" ? "已通过" : meta.label === "fail" ? "未通过" : "待检查",
+      )}</StatusPill>
     </div>
   );
 }
@@ -1751,6 +1766,7 @@ function ChecksSection({
   attesting: boolean;
   onSave: (checks: Check[]) => void;
 }) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
 
   if (editing) {
@@ -1771,7 +1787,7 @@ function ChecksSection({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          Checks
+          {t("Checks", "检查项")}
           {checks.length > 0 && (
             <span className={cn("tabular-nums", checks.every((check) => check.result === "pass") && "text-success")}>
               {checks.filter((check) => check.result === "pass").length}/{checks.length}
@@ -1788,7 +1804,7 @@ function ChecksSection({
               onClick={onRun}
             >
               {running ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
-              Run
+              {t("Run checks", "运行检查")}
             </Button>
           )}
           <Button
@@ -1798,7 +1814,7 @@ function ChecksSection({
             onClick={() => setEditing(true)}
           >
             <Pencil className="size-3" />
-            Edit
+            {t("Edit", "编辑")}
           </Button>
         </div>
       </div>
@@ -1816,7 +1832,7 @@ function ChecksSection({
           ))}
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">No checks.</p>
+        <p className="text-xs text-muted-foreground">{t("No checks yet.", "还没有检查项。")}</p>
       )}
     </div>
   );
@@ -1833,6 +1849,7 @@ function ChecksEditor({
   onCancel: () => void;
   onSave: (checks: Check[]) => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<Check[]>(checks.map((check) => ({ ...check })));
 
   const setRow = (index: number, next: Partial<Check>) =>
@@ -1849,17 +1866,17 @@ function ChecksEditor({
 
   return (
     <div className="space-y-2">
-      <h3 className="text-xs font-medium text-muted-foreground">Checks</h3>
+      <h3 className="text-xs font-medium text-muted-foreground">{t("Checks", "检查项")}</h3>
       <div className="space-y-2 rounded-lg border p-2">
         {draft.length === 0 && (
-          <p className="px-1 py-2 text-xs text-muted-foreground">No checks. Add one below.</p>
+          <p className="px-1 py-2 text-xs text-muted-foreground">{t("No checks yet. Add one below.", "还没有检查项，可以在下方添加。")}</p>
         )}
         {draft.map((check, index) => (
           <div key={index} className="space-y-1.5 rounded-md border bg-muted/30 p-2">
             <div className="flex items-center gap-1.5">
               <Input
                 value={check.desc}
-                placeholder="What it verifies…"
+                placeholder={t("What should be checked…", "检查内容…")}
                 onChange={(event) => setRow(index, { desc: event.target.value })}
                 className="h-7 text-xs"
               />
@@ -1867,7 +1884,7 @@ function ChecksEditor({
                 variant="ghost"
                 size="icon"
                 className="size-7 shrink-0 text-destructive"
-                aria-label="Remove check"
+                aria-label={t("Remove check", "移除检查项")}
                 onClick={() => removeRow(index)}
               >
                 <X className="size-3.5" />
@@ -1875,23 +1892,23 @@ function ChecksEditor({
             </div>
             <Input
               value={check.cmd ?? ""}
-              placeholder="Command (blank = manual check)"
+              placeholder={t("Command (leave blank for a manual check)", "命令（留空则手动检查）")}
               onChange={(event) => setRow(index, { cmd: event.target.value })}
               className="h-7 font-mono text-xs"
             />
           </div>
         ))}
         <Button variant="ghost" size="sm" className="h-7 w-full justify-start text-xs" onClick={addRow}>
-          <Plus className="size-3" /> Add check
+          <Plus className="size-3" /> {t("Add check", "添加检查项")}
         </Button>
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+          {t("Cancel", "取消")}
         </Button>
         <Button size="sm" variant="secondary" disabled={saving} onClick={save}>
           {saving && <Loader2 className="animate-spin" />}
-          Save
+          {t("Save", "保存")}
         </Button>
       </div>
     </div>
@@ -1905,6 +1922,7 @@ function LabelsEditor({
   labels: string[];
   onChange: (labels: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [input, setInput] = useState("");
   const add = () => {
     const value = input.trim();
@@ -1920,7 +1938,7 @@ function LabelsEditor({
             <Badge key={label} variant="secondary" className="gap-1 pr-1 text-xs font-normal">
               {label}
               <button
-                aria-label={`Remove ${label}`}
+                aria-label={t("Remove {label}", "移除标签 {label}", { label })}
                 onClick={() => onChange(labels.filter((value) => value !== label))}
                 className="grid size-3.5 place-items-center rounded hover:bg-foreground/10"
               >
@@ -1939,7 +1957,7 @@ function LabelsEditor({
             add();
           }
         }}
-        placeholder="Add label…"
+        placeholder={t("Add label…", "添加标签…")}
         className="h-7 text-xs"
       />
     </div>
@@ -1963,8 +1981,8 @@ function EvidenceEditor({
     <section className="mt-5 border-t pt-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-medium">{t("Evidence", "证明 / Evidence")}</h3>
-          <p className="text-xs text-muted-foreground">{t("Structured, auditable proof records.", "结构化且可审计的证明记录。")}</p>
+          <h3 className="text-sm font-medium">{t("Delivery records", "交付凭据")}</h3>
+          <p className="text-xs text-muted-foreground">{t("Keep links, screenshots, or verification results here for later reference.", "把链接、截图或验证结果记在这里，方便回看。")}</p>
         </div>
         <Button type="button" variant="outline" size="xs" onClick={() => onChange([...evidence, { kind: "", value: "" }])}>
           <Plus data-icon="inline-start" />{t("Add", "添加")}
@@ -1975,8 +1993,8 @@ function EvidenceEditor({
           <div key={item.id ?? `new-${index}`} className="flex flex-col gap-2 border-b pb-3">
             <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] gap-2">
               <Input value={item.kind} onChange={(event) => onUpdate(index, { kind: event.target.value })} placeholder={t("Kind", "类型")} />
-              <Input value={item.value} onChange={(event) => onUpdate(index, { value: event.target.value })} placeholder={t("Evidence value", "证明内容")} />
-              <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" aria-label={t("Remove evidence", "移除证明")} onClick={() => onChange(evidence.filter((_, itemIndex) => itemIndex !== index))}>
+              <Input value={item.value} onChange={(event) => onUpdate(index, { value: event.target.value })} placeholder={t("Record details", "凭据内容")} />
+              <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" aria-label={t("Remove delivery record", "移除交付凭据")} onClick={() => onChange(evidence.filter((_, itemIndex) => itemIndex !== index))}>
                 <X />
               </Button>
             </div>
@@ -1989,7 +2007,7 @@ function EvidenceEditor({
             )}
           </div>
         ))}
-        {evidence.length === 0 && <p className="text-xs text-muted-foreground">{t("No evidence yet.", "暂未添加证明。")}</p>}
+        {evidence.length === 0 && <p className="text-xs text-muted-foreground">{t("No delivery records yet.", "还没有添加交付凭据。")}</p>}
       </div>
     </section>
   );
@@ -2058,13 +2076,13 @@ function LeaseEditor({
           <Input id={`carbon-task-assignee-${taskId}`} value={assignee} onChange={(event) => onAssigneeChange(event.target.value)} placeholder="human:you or agent:codex" />
         </Field>
         <Field>
-          <FieldLabel htmlFor={`carbon-task-lease-reason-${taskId}`}>{t("Ownership reason", "所有权操作原因")}</FieldLabel>
-          <Input id={`carbon-task-lease-reason-${taskId}`} value={leaseReason} onChange={(event) => onLeaseReasonChange(event.target.value)} placeholder={t("Required for claim conflicts, reassignment, release, and approval", "认领冲突、重新分配、释放和审批时必填")} />
+          <FieldLabel htmlFor={`carbon-task-lease-reason-${taskId}`}>{t("Handoff note", "接手/转交说明")}</FieldLabel>
+          <Input id={`carbon-task-lease-reason-${taskId}`} value={leaseReason} onChange={(event) => onLeaseReasonChange(event.target.value)} placeholder={t("Explain conflicts, handoffs, releases, or approvals", "遇到冲突、转交、释放或审批时，请说明原因")} />
         </Field>
       </FieldGroup>
       {!hasLease ? (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={missingVersion || pending || !leaseReason.trim()} onClick={onClaim}>{t("Claim lease", "认领租约")}</Button>
+          <Button size="sm" variant="outline" disabled={missingVersion || pending || !leaseReason.trim()} onClick={onClaim}>{t("Ask to take over", "申请接手")}</Button>
           <Button size="sm" variant="outline" disabled={missingVersion || pending || !assignee.trim() || !leaseReason.trim() || (requiresForce && !forceReassign)} onClick={onReassign}>{t("Assign", "分配")}</Button>
         </div>
       ) : heldByCurrentActor ? (
@@ -2079,18 +2097,18 @@ function LeaseEditor({
             <Checkbox id={`carbon-task-force-lease-${taskId}`} checked={forceReassign} onCheckedChange={(checked) => onForceReassignChange(checked === true)} />
             <FieldLabel htmlFor={`carbon-task-force-lease-${taskId}`}>{t("Force reassignment", "强制重新分配")}</FieldLabel>
           </Field>
-          <Button size="sm" variant="outline" className="self-start" disabled={missingVersion || !assignee.trim() || !leaseReason.trim() || !forceReassign || pending} onClick={onReassign}>{t("Reassign lease", "重新分配租约")}</Button>
+          <Button size="sm" variant="outline" className="self-start" disabled={missingVersion || !assignee.trim() || !leaseReason.trim() || !forceReassign || pending} onClick={onReassign}>{t("Hand off task", "转交任务")}</Button>
         </div>
       )}
       {pendingClaims.length > 0 && (
         <div className="flex flex-col gap-2 border-t pt-3">
-          <p className="text-xs font-medium">{t("Pending lease requests", "待处理的租约申请")}</p>
+          <p className="text-xs font-medium">{t("Handoff requests to review", "待确认的接手申请")}</p>
           {pendingClaims.map((request) => request.requestId && (
             <div key={request.requestId} className="flex flex-wrap items-center gap-2 border-b pb-2 text-xs">
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{formatWorker(request.actor ?? request.assignee) || request.requestId}</span>
                 {request.reason && <span className="mt-0.5 block text-muted-foreground">{request.reason}</span>}
-                <span className="mt-0.5 block text-muted-foreground">{request.requestedAt ? timeAgo(request.requestedAt) : t("time not reported", "未报告时间")}{request.leaseTtlSeconds ? ` · TTL ${request.leaseTtlSeconds}s` : ""}</span>
+                <span className="mt-0.5 block text-muted-foreground">{request.requestedAt ? timeAgo(request.requestedAt) : t("time unavailable", "时间未知")}{request.leaseTtlSeconds ? ` · ${t("valid for {seconds} seconds", "有效期 {seconds} 秒", { seconds: request.leaseTtlSeconds })}` : ""}</span>
               </span>
               <Button size="xs" variant="outline" disabled={missingVersion || pending || !leaseReason.trim()} onClick={() => onApprove(request.requestId!, true)}>{t("Approve", "批准")}</Button>
               <Button size="xs" variant="ghost" disabled={missingVersion || pending || !leaseReason.trim()} onClick={() => onApprove(request.requestId!, false)}>{t("Reject", "拒绝")}</Button>

@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,17 +37,20 @@ func TestSSEStreamsTaskChangeEvent(t *testing.T) {
 	}
 
 	// Headers are sent only after the handler has subscribed, so the watcher is live now.
-	// Create two tasks within one debounce window: touching multiple task files coalesces
-	// into a list-level tasks-changed (a single create is the more precise task-changed,
-	// covered below). Creates no longer bump a config counter, so the list signal now comes
-	// from the task files themselves.
+	// Under load the two writes can land either in one debounce window (tasks-changed) or
+	// in adjacent windows (task-changed). The deterministic coalescer tests cover that
+	// boundary; this integration test verifies that the SSE transport emits a valid refresh.
 	var a, b taskDTO
 	call(t, s.Handler(), "POST", "/api/tasks?path="+root, `{"title":"realtime one"}`, &a)
 	call(t, s.Handler(), "POST", "/api/tasks?path="+root, `{"title":"realtime two"}`, &b)
 
 	line := readSSEData(t, resp.Body)
-	if !strings.Contains(line, "tasks-changed") {
-		t.Fatalf("event line = %q, want a tasks-changed signal", line)
+	var event Event
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		t.Fatalf("event line = %q: %v", line, err)
+	}
+	if event.Type != evtTasksChanged && (event.Type != evtTaskChanged || (event.ID != a.ID && event.ID != b.ID)) {
+		t.Fatalf("event = %+v, want tasks-changed or task-changed for %s/%s", event, a.ID, b.ID)
 	}
 }
 

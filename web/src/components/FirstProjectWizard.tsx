@@ -66,7 +66,7 @@ export function FirstProjectWizard({
     try {
       const result = await ensureHome.mutateAsync(home);
       if (!result.available) {
-        setError(t("This Carbon sidecar cannot initialize a Main Data Home.", "此 Carbon 本地服务无法初始化主数据目录。"));
+        setError(t("This Carbon version cannot initialize a Main Data Home. Update Carbon and try again.", "当前 Carbon 版本暂不支持初始化主数据目录，请更新后重试。"));
       }
     } catch (cause) {
       setError(errorMessage(cause));
@@ -83,7 +83,7 @@ export function FirstProjectWizard({
         slug: clusterSlug.trim() || undefined,
       });
       if (!result.available) {
-        setError(t("This Carbon sidecar cannot create clusters.", "此 Carbon 本地服务无法创建项目集群。"));
+        setError(t("This Carbon version cannot create clusters. Update Carbon and try again.", "当前 Carbon 版本暂不支持创建项目集群，请更新后重试。"));
         return;
       }
       setNewCluster(result.data);
@@ -109,13 +109,13 @@ export function FirstProjectWizard({
         if (imageIntent.kind === "upload") {
           const upload = await uploadAsset.mutateAsync({ target: "project", id: target.project.id, file: imageIntent.file });
           if (!upload.available) {
-            throw new Error(t("Project image upload needs a newer Carbon sidecar.", "项目图片上传需要更新的 Carbon 本地服务。"));
+            throw new Error(t("Update Carbon before uploading a project image.", "请更新 Carbon 后再上传项目图片。"));
           }
           notifyCatalogIconAssetChanged();
         } else if (imageIntent.kind === "clear") {
           const remove = await deleteAsset.mutateAsync({ target: "project", id: target.project.id });
           if (!remove.available) {
-            throw new Error(t("Project image removal needs a newer Carbon sidecar.", "项目图片移除需要更新的 Carbon 本地服务。"));
+            throw new Error(t("Update Carbon before removing a project image.", "请更新 Carbon 后再移除项目图片。"));
           }
           notifyCatalogIconAssetChanged();
         }
@@ -136,7 +136,7 @@ export function FirstProjectWizard({
         sourcePath: path,
       });
       if (!result.available) {
-        setError(t("This Carbon sidecar cannot add projects.", "此 Carbon 本地服务无法添加项目。"));
+        setError(t("This Carbon version cannot add projects. Update Carbon and try again.", "当前 Carbon 版本暂不支持添加项目，请更新后重试。"));
         return;
       }
       const target = { project: result.data, clusterId: clusterId || undefined };

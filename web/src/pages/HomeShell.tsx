@@ -251,7 +251,7 @@ export function HomeShell({ initialHome, suggestedActor }: { initialHome?: strin
   if (!data) {
     return (
       <div className="grid h-full place-items-center p-6">
-        <Card className="max-w-xl"><CardHeader><CardTitle>{t("Carbon Home is unavailable", "Carbon 主目录不可用")}</CardTitle><CardDescription>{t("This Carbon sidecar does not provide the Home API required by this build.", "当前 Carbon 本地服务未提供此版本所需的主目录 API。")}</CardDescription></CardHeader></Card>
+        <Card className="max-w-xl"><CardHeader><CardTitle>{t("Carbon Home is unavailable", "Carbon 主目录不可用")}</CardTitle><CardDescription>{t("This Carbon version does not support the Home features required here. Update Carbon and try again.", "当前 Carbon 版本不支持主目录功能，请更新后重试。")}</CardDescription></CardHeader></Card>
       </div>
     );
   }

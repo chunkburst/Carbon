@@ -39,6 +39,7 @@ import { SelectItem } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -46,6 +47,7 @@ import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { StatusIcon } from "@/components/StatusIcon";
 import { PriorityIcon, priorityLabel } from "@/components/PriorityIcon";
 import { Facet } from "@/components/Facet";
+import { SearchableFacet } from "@/components/SearchableFacet";
 import { EmptyState } from "@/components/EmptyState";
 import { Assignee } from "@/components/Assignee";
 import { useDeleteTask, useReorder, useTasks, useTransition } from "@/lib/queries";
@@ -362,13 +364,12 @@ export function KanbanBoard({
             </Facet>
           )}
           {labelOpts.length > 0 && (
-            <Facet value={label} onChange={(value) => updateFilters({ label: value })} placeholder={t("Label", "标签")}>
-              {labelOpts.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {value}
-                </SelectItem>
-              ))}
-            </Facet>
+            <SearchableFacet
+              value={label}
+              onChange={(value) => updateFilters({ label: value })}
+              placeholder={t("Label", "标签")}
+              options={labelOpts}
+            />
           )}
           {assigneeOpts.length > 0 && (
             <Facet value={assignee} onChange={(value) => updateFilters({ assignee: value })} placeholder={t("Assignee", "负责人")}>
@@ -735,9 +736,11 @@ function CardMenu({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
-            <Trash2 /> {t("Delete", "删除")}
-          </DropdownMenuItem>
+          <DropdownMenuGroup>
+            <DropdownMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
+              <Trash2 /> {t("Delete", "删除")}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
       <ConfirmDeleteDialog

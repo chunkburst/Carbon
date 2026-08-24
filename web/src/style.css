@@ -148,6 +148,7 @@
 }
 
 :root {
+    color-scheme: light;
     /* Light mode is deliberately white. Brand colour belongs to controls and
        selection states, never the workspace canvas. */
     --background: oklch(1 0 0);
@@ -195,6 +196,7 @@
 
 /* Midnight carbon: blue-grey elevation steps keep the workspace readable. */
 .dark {
+    color-scheme: dark;
     --background: oklch(0.215 0.019 258);
     --foreground: oklch(0.945 0.014 250);
     --card: oklch(0.265 0.022 257);

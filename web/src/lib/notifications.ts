@@ -795,13 +795,19 @@ function dedupeHomeNotificationScopes(
  * sibling projects while retaining a project-specific opt-out when requested.
  */
 export function useCarbonNotifications(scope: CarbonScopeInput, actor?: string, options: CarbonNotificationOptions = {}) {
-  const aggregation = options.aggregation ?? "cluster";
+  const requestedAggregation = options.aggregation ?? "cluster";
   const documentVisible = useDocumentVisible();
   const resolvedHomeId = useCarbonHomeID(scope, options.homeId);
   const baseIdentity = useMemo(
     () => scopeIdentity(scope, resolvedHomeId),
     [resolvedHomeId, scope],
   );
+  // A standalone project has no cluster store. Treat the default cluster inbox as
+  // project-scoped instead of issuing an invalid include_cluster=true request and
+  // dropping the project id from its notification storage key.
+  const aggregation: CarbonNotificationAggregation = requestedAggregation === "cluster" && !baseIdentity.clusterId
+    ? "project"
+    : requestedAggregation;
   const preferenceScope = useMemo(
     () => ({ homeId: baseIdentity.homeId, home: baseIdentity.home, legacyPath: baseIdentity.legacyPath }),
     [baseIdentity.home, baseIdentity.homeId, baseIdentity.legacyPath],
@@ -844,7 +850,9 @@ export function useCarbonNotifications(scope: CarbonScopeInput, actor?: string, 
   const homeQueries = useQueries({
     queries: homeEntries.map((entry) => ({
       queryKey: ["carbon", "notification-home", carbonScopeKey(entry.input)],
-      queryFn: () => listCarbonTasks(entry.input, true),
+      // Cluster stores aggregate sibling projects; standalone stores must remain
+      // project-scoped because include_cluster is deliberately rejected there.
+      queryFn: () => listCarbonTasks(entry.input, Boolean(entry.scope.clusterId)),
       enabled: aggregation === "home" && documentVisible,
       retry: false,
       // Home aggregation is intentionally opt-in. Its independent polling keeps

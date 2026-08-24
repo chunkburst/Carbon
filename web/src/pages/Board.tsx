@@ -3,10 +3,11 @@ import { Bookmark, ChevronRight, Inbox, ListChecks, Plus, Search, Tags, Trash2, 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PriorityIcon, PRIORITIES, priorityLabel } from "@/components/PriorityIcon";
 import { Facet } from "@/components/Facet";
+import { SearchableFacet } from "@/components/SearchableFacet";
 import { EmptyState } from "@/components/EmptyState";
 import { Onboarding } from "@/components/Onboarding";
 import { addView, loadViews, removeView, type SavedView } from "@/lib/views";
@@ -208,23 +210,29 @@ export function Board({
               {views.length === 0 && (
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">{t("None yet", "暂无")}</div>
               )}
-              {views.map((v) => (
-                <DropdownMenuItem key={v.name} onSelect={() => applyView(v)} className="justify-between">
-                  <span className="truncate">{v.name}</span>
-                  <button
-                    aria-label={t("Delete {name}", "删除 {name}", { name: v.name })}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setViews(removeView(path, v.name));
-                    }}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </DropdownMenuItem>
-              ))}
+              {views.length > 0 && (
+                <DropdownMenuGroup>
+                  {views.map((v) => (
+                    <DropdownMenuItem key={v.name} onSelect={() => applyView(v)} className="justify-between">
+                      <span className="truncate">{v.name}</span>
+                      <button
+                        aria-label={t("Delete {name}", "删除 {name}", { name: v.name })}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViews(removeView(path, v.name));
+                        }}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={saveCurrentView}>{t("Save current view…", "保存当前视图…")}</DropdownMenuItem>
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={saveCurrentView}>{t("Save current view…", "保存当前视图…")}</DropdownMenuItem>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={onNewTask}>
@@ -247,13 +255,12 @@ export function Board({
             </Facet>
           )}
           {labelOpts.length > 0 && (
-            <Facet value={label} onChange={setLabel} placeholder={t("Label", "标签")}>
-              {labelOpts.map((l) => (
-                <SelectItem key={l} value={l}>
-                  {l}
-                </SelectItem>
-              ))}
-            </Facet>
+            <SearchableFacet
+              value={label}
+              onChange={setLabel}
+              placeholder={t("Label", "标签")}
+              options={labelOpts}
+            />
           )}
           {assigneeOpts.length > 0 && (
             <Facet value={assignee} onChange={setAssignee} placeholder={t("Assignee", "负责人")}>
@@ -285,9 +292,11 @@ export function Board({
           >
             <SelectTrigger className="h-8 w-36 text-sm">{t("Move to…", "移动到…")}</SelectTrigger>
             <SelectContent>
-              {(status.states ?? []).map((state) => (
-                <SelectItem key={state} value={state}>{statusLabel(state)}</SelectItem>
-              ))}
+              <SelectGroup>
+                {(status.states ?? []).map((state) => (
+                  <SelectItem key={state} value={state}>{statusLabel(state)}</SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Select
@@ -299,8 +308,10 @@ export function Board({
           >
             <SelectTrigger className="h-8 w-40 text-sm">{t("Set priority…", "设置优先级…")}</SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">{t("No priority", "无优先级")}</SelectItem>
-              {PRIORITIES.map((value) => <SelectItem key={value} value={value}>{priorityLabel(value)}</SelectItem>)}
+              <SelectGroup>
+                <SelectItem value="none">{t("No priority", "无优先级")}</SelectItem>
+                {PRIORITIES.map((value) => <SelectItem key={value} value={value}>{priorityLabel(value)}</SelectItem>)}
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Input
@@ -328,7 +339,7 @@ export function Board({
           </Button>
           {!bulkAvailable && (
             <span className="basis-full text-xs text-muted-foreground">
-              {t("Atomic bulk actions are available after the server upgrades to Carbon stable v2.", "服务端升级至 Carbon stable v2 后可用原子批量操作。")}
+              {t("Update Carbon to use bulk actions.", "批量操作需要更新 Carbon 后才能使用。")}
             </span>
           )}
         </div>
@@ -370,6 +381,7 @@ export function Board({
     </div>
   );
 }
+
 function StatusSection({
   path,
   state,
@@ -431,7 +443,6 @@ function StatusSection({
     </Collapsible>
   );
 }
-
 type Translate = (en: string, zh: string, vars?: Record<string, string | number>) => string;
 
 function filterLabel(filter: Filter, t: Translate): string {

@@ -233,13 +233,13 @@ export function TaskRow({
         <Assignee actor={task.assignee} className="shrink-0" />
       ) : (
         <button
-          aria-label={t("Claim", "认领")}
+          aria-label={t("Take over", "接手")}
           disabled={claimPending || claimChecking || !leaseSupported}
           onClick={(e) => {
             stop(e);
             setClaimDialogOpen(true);
           }}
-          title={!claimChecking && !leaseSupported ? t("Safe claiming requires the Carbon lease workflow", "安全认领需要 Carbon 租约流程") : undefined}
+          title={!claimChecking && !leaseSupported ? t("Taking over a task needs the current Carbon workflow", "接手任务需要当前 Carbon 工作流程") : undefined}
           className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:bg-foreground/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 group-hover:opacity-100 focus-visible:opacity-100"
         >
           <UserPlus className="size-3.5" />
@@ -284,20 +284,19 @@ export function TaskRow({
       <AlertDialog open={confirmClaim} onOpenChange={setClaimDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("Claim this task?", "确认认领此任务？")}</AlertDialogTitle>
+            <AlertDialogTitle>{t("Take over this task?", "确认接手此任务？")}</AlertDialogTitle>
             <AlertDialogDescription>
               {claimChecking
-                ? t("Checking the available ownership safeguards…", "正在检查可用的负责人保护机制…")
+                ? t("Checking the task's current state…", "正在检查任务当前状态…")
                 : leaseSupported
                   ? t(
-                      "This submits a lease request for {actor} with an optimistic version lock.",
-                      "这会为 {actor} 提交带乐观版本锁的租约申请。",
+                      "This asks to hand the task to {actor}. If someone else is responsible now, they will confirm the handoff first.",
+                      "这会请求将任务交给 {actor}。如果目前已有负责人，对方需要先确认交接。",
                       { actor },
                     )
                   : t(
-                      "This assigns {actor} as the task owner immediately.",
-                      "确认后会立即将 {actor} 设置为该任务的负责人。",
-                      { actor },
+                      "This Carbon project needs an update before the task can be taken over.",
+                      "当前 Carbon 项目需要更新后，才能接手此任务。",
                     )}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -305,7 +304,7 @@ export function TaskRow({
             <p className="font-medium">{task.title}</p>
             <p className="mt-1 font-mono text-xs text-muted-foreground">{task.id}</p>
             <p className="mt-2 text-muted-foreground">
-              {t("Actor: {actor}", "认领人：{actor}", { actor })}
+              {t("Taking over: {actor}", "接手人：{actor}", { actor })}
             </p>
           </div>
           {leaseSupported ? (
@@ -313,13 +312,13 @@ export function TaskRow({
               <FieldGroup className="gap-3">
                 <Field>
                   <FieldLabel htmlFor={`claim-reason-${task.id}`}>
-                    {t("Ownership reason", "认领原因")}
+                    {t("Why take this task?", "接手说明")}
                   </FieldLabel>
                   <Input
                     id={`claim-reason-${task.id}`}
                     value={claimReason}
                     onChange={(event) => setClaimReason(event.target.value)}
-                    placeholder={t("Why are you claiming this task?", "说明为什么要认领此任务")}
+                    placeholder={t("What will you take care of?", "说明接手后会负责什么")}
                   />
                 </Field>
               </FieldGroup>
@@ -328,15 +327,15 @@ export function TaskRow({
                   <RefreshCw />
                   <AlertDescription>
                     {t(
-                      "This task has no current version. Refresh the task before requesting a lease so the optimistic lock can be enforced.",
-                      "此任务缺少当前版本号。请先刷新任务，再申请租约，以确保乐观锁生效。",
+                      "This task changed or did not load completely. Refresh it before taking it over.",
+                      "此任务刚刚变更或未完整加载。请先刷新，再接手。",
                     )}
                   </AlertDescription>
                 </Alert>
               )}
             </>
-          ) : <Alert><AlertDescription>{t("Direct legacy claiming is disabled because it cannot enforce a reason and optimistic version lock. Migrate this task to Carbon before claiming it.", "旧版直接认领无法强制记录原因和乐观版本锁，因此已禁用。请先将此任务迁移到 Carbon 再认领。")}</AlertDescription></Alert>}
-          {claimAwaitingApproval && <Alert><AlertDescription>{t("This lease request is waiting for the current owner to approve it.", "此租约申请正在等待当前负责人审批。")}</AlertDescription></Alert>}
+          ) : <Alert><AlertDescription>{t("This task needs the current Carbon handoff flow before it can be taken over.", "此任务需要使用当前 Carbon 交接流程后，才能接手。")}</AlertDescription></Alert>}
+          {claimAwaitingApproval && <Alert><AlertDescription>{t("Waiting for the current task lead to confirm the handoff.", "正在等待当前负责人确认交接。")}</AlertDescription></Alert>}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={claimPending}>{t("Cancel", "取消")}</AlertDialogCancel>
             <Button
@@ -347,10 +346,10 @@ export function TaskRow({
               {claimChecking
                 ? t("Checking…", "正在检查…")
                   : claimAwaitingApproval
-                    ? t("Awaiting approval", "等待审批")
+                    ? t("Waiting for confirmation", "等待确认")
                   : claimPending
-                    ? t("Claiming…", "正在认领…")
-                    : t("Request lease", "申请租约")}
+                    ? t("Requesting takeover…", "正在请求接手…")
+                    : t("Request takeover", "请求接手")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

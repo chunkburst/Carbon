@@ -20,6 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"carbon/internal/identity"
 	"carbon/internal/store"
 
 	"gopkg.in/yaml.v3"
@@ -39,6 +40,8 @@ const (
 	maxBodyBytes    = 64 << 10
 	maxTagBytes     = 64
 	maxTags         = 32
+	maxRecipients   = 16
+	maxThreadBytes  = 48
 )
 
 var (
@@ -49,6 +52,9 @@ var (
 	ErrInvalidWorkLog = errors.New("invalid work log")
 	// ErrInvalidFilter identifies unsupported Work Log list constraints.
 	ErrInvalidFilter = errors.New("invalid work log filter")
+	// ErrCoordinationImmutable keeps a server-created collaboration envelope
+	// append-only even if an internal caller reaches the persistence manager directly.
+	ErrCoordinationImmutable = errors.New("work log coordination is immutable")
 )
 
 // Visibility controls which scope is eligible to read a Work Log. This package persists
@@ -66,6 +72,20 @@ const (
 	VisibilityGlobalPublic  = GlobalPublic
 )
 
+// CoordinationVersion identifies the first server-owned collaboration envelope.
+// Missing Coordination remains a normal, fully compatible historical record.
+const CoordinationVersion = 1
+
+// Coordination is server-owned metadata attached only by the dedicated
+// worklog_draft_send Service primitive. Tags remain useful presentation/search hints,
+// but authorization must use this durable, versioned envelope rather than a
+// user-controlled tag that older records might already contain.
+type Coordination struct {
+	Version    int      `yaml:"version" json:"version"`
+	Recipients []string `yaml:"recipients,omitempty" json:"recipients,omitempty"`
+	Thread     string   `yaml:"thread,omitempty" json:"thread,omitempty"`
+}
+
 // Log is the complete durable Work Log record. Version is an opaque SHA-256 fingerprint
 // calculated from the serialized YAML; it is returned to clients but never persisted.
 type Log struct {
@@ -81,11 +101,15 @@ type Log struct {
 	Title      string   `yaml:"title" json:"title"`
 	Body       string   `yaml:"body,omitempty" json:"body,omitempty"`
 	Tags       []string `yaml:"tags,omitempty" json:"tags,omitempty"`
-	CreatedAt  string   `yaml:"created_at" json:"created_at"`
-	CreatedBy  string   `yaml:"created_by" json:"created_by"`
-	UpdatedAt  string   `yaml:"updated_at" json:"updated_at"`
-	UpdatedBy  string   `yaml:"updated_by" json:"updated_by"`
-	Version    string   `yaml:"-" json:"version,omitempty"`
+	// Coordination is server-owned and optional for backward compatibility. It is
+	// exposed to clients so they can render collaboration routing, but generic write
+	// surfaces must never be able to create, replace, or remove it.
+	Coordination *Coordination `yaml:"coordination,omitempty" json:"coordination,omitempty"`
+	CreatedAt    string        `yaml:"created_at" json:"created_at"`
+	CreatedBy    string        `yaml:"created_by" json:"created_by"`
+	UpdatedAt    string        `yaml:"updated_at" json:"updated_at"`
+	UpdatedBy    string        `yaml:"updated_by" json:"updated_by"`
+	Version      string        `yaml:"-" json:"version,omitempty"`
 }
 
 // WorkLog is retained as an explicit name for integrations that prefer the product term.
@@ -200,6 +224,9 @@ func (m *Manager) Update(ctx context.Context, actor string, log Log, expectedVer
 		}
 		if err := matchVersion(fingerprint(raw), expectedVersion); err != nil {
 			return err
+		}
+		if !equalCoordination(log.Coordination, current.Coordination) {
+			return ErrCoordinationImmutable
 		}
 
 		log.CreatedAt, log.CreatedBy = current.CreatedAt, current.CreatedBy
@@ -400,6 +427,48 @@ func validateWritable(log Log) error {
 	if err := validateTags(log.Tags); err != nil {
 		return err
 	}
+	if err := validateCoordination(log); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateCoordination(log Log) error {
+	coordination := log.Coordination
+	if coordination == nil {
+		return nil
+	}
+	if coordination.Version != CoordinationVersion {
+		return fmt.Errorf("%w: unsupported coordination version %d", ErrInvalidWorkLog, coordination.Version)
+	}
+	if log.Visibility != WorkerPrivate || log.ProjectID == "" || !identity.IsAgent(log.Worker) {
+		return fmt.Errorf("%w: coordination requires an agent-owned project worker_private log", ErrInvalidWorkLog)
+	}
+	if len(coordination.Recipients) > maxRecipients {
+		return fmt.Errorf("%w: coordination has more than %d recipients", ErrInvalidWorkLog, maxRecipients)
+	}
+	seen := make(map[string]struct{}, len(coordination.Recipients))
+	for _, recipient := range coordination.Recipients {
+		if !identity.IsAgent(recipient) {
+			return fmt.Errorf("%w: coordination recipient %q is not a canonical agent", ErrInvalidWorkLog, recipient)
+		}
+		if _, exists := seen[recipient]; exists {
+			return fmt.Errorf("%w: duplicate coordination recipient %q", ErrInvalidWorkLog, recipient)
+		}
+		seen[recipient] = struct{}{}
+	}
+	if coordination.Thread == "" {
+		return nil
+	}
+	if len(coordination.Thread) > maxThreadBytes || !utf8.ValidString(coordination.Thread) || strings.TrimSpace(coordination.Thread) != coordination.Thread {
+		return fmt.Errorf("%w: invalid coordination thread", ErrInvalidWorkLog)
+	}
+	for _, r := range coordination.Thread {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			continue
+		}
+		return fmt.Errorf("%w: invalid coordination thread", ErrInvalidWorkLog)
+	}
 	return nil
 }
 
@@ -599,5 +668,22 @@ func matchVersion(current, expected string) error {
 
 func clone(log Log) Log {
 	log.Tags = slices.Clone(log.Tags)
+	log.Coordination = cloneCoordination(log.Coordination)
 	return log
+}
+
+func cloneCoordination(value *Coordination) *Coordination {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.Recipients = slices.Clone(value.Recipients)
+	return &copy
+}
+
+func equalCoordination(left, right *Coordination) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Version == right.Version && left.Thread == right.Thread && slices.Equal(left.Recipients, right.Recipients)
 }

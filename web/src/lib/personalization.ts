@@ -2,7 +2,38 @@
 // portable folder can move without changing a user's project landing place.
 
 export type ProjectManagementPresentation = "dialog" | "page";
-export type BoardPresentation = "row" | "card";
+export type TaskListPresentation = "row" | "card";
+export type WorkspaceTaskSurface = "tasks" | "agent-work" | "board";
+/** @deprecated Kept only to read preferences written by Carbon 1.0.0 previews. */
+export type BoardPresentation = "row" | "card" | "animation";
+export type AnimationBoardStyle = "pixel-agents" | "market-kline";
+export type MarketTimeframe = "1m" | "5m" | "30m" | "1h" | "1d";
+
+export type AnimationStyleMetadata = {
+  /** Playback rate as a percentage. 100 is the authored cadence. */
+  speed: number;
+  /** Style-owned energy range. K-line maps this 0–1000 value to live volatility. */
+  volatility: number;
+};
+
+export const ANIMATION_SPEED_MIN = 25;
+export const ANIMATION_SPEED_MAX = 300;
+export const ANIMATION_VOLATILITY_MIN = 0;
+export const ANIMATION_VOLATILITY_MAX = 1_000;
+export const DEFAULT_ANIMATION_STYLE_METADATA: Readonly<AnimationStyleMetadata> = {
+  speed: 100,
+  volatility: 200,
+};
+
+export type FloatingBoardPreference = {
+  open: boolean;
+  minimized: boolean;
+  pinned: boolean;
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+};
 
 export type LastProjectSelection = {
   /** Absent for a standalone project; older records retain their cluster id. */
@@ -12,7 +43,13 @@ export type LastProjectSelection = {
 
 const PROJECT_MANAGEMENT_PRESENTATION_KEY = "carbon:project-management-presentation";
 const BOARD_PRESENTATION_KEY = "carbon:board-presentation";
+const TASK_LIST_PRESENTATION_KEY = "carbon:task-list-presentation:v1";
+const WORKSPACE_TASK_SURFACE_KEY = "carbon:workspace-task-surface:v1";
+const ANIMATION_BOARD_STYLE_KEY = "carbon:animation-board-style";
+const FLOATING_BOARD_KEY = "carbon:floating-board:v1";
 const BOARD_STATUS_SECTIONS_PREFIX = "carbon:board-status-sections:v1:";
+const MARKET_TIMEFRAME_PREFIX = "carbon:market-timeframe:v1:";
+const ANIMATION_STYLE_METADATA_PREFIX = "carbon:animation-style-metadata:v1:";
 const LAST_PROJECT_PREFIX = "carbon:last-project:v1:";
 export const PERSONALIZATION_EVENT = "carbon-personalization-change";
 
@@ -52,11 +89,200 @@ export function setProjectManagementPresentation(value: ProjectManagementPresent
  * project updates every open Carbon board immediately.
  */
 export function getBoardPresentation(): BoardPresentation {
-  return read(BOARD_PRESENTATION_KEY) === "card" ? "card" : "row";
+  const value = read(BOARD_PRESENTATION_KEY);
+  return value === "card" || value === "animation" ? value : "row";
 }
 
 export function setBoardPresentation(value: BoardPresentation): void {
   write(BOARD_PRESENTATION_KEY, value);
+}
+
+/**
+ * Rows/cards belong to task-oriented surfaces. The dedicated visual board owns
+ * its animation style separately, so choosing a K-line can never replace the
+ * Tasks or Agent work lists again.
+ */
+export function getTaskListPresentation(): TaskListPresentation {
+  const value = read(TASK_LIST_PRESENTATION_KEY);
+  if (value === "row" || value === "card") return value;
+
+  // One-way compatibility with the former shared board preference. An old
+  // animation choice intentionally falls back to rows instead of leaking into
+  // the functional task views.
+  const legacy = read(BOARD_PRESENTATION_KEY);
+  return legacy === "card" ? "card" : "row";
+}
+
+export function setTaskListPresentation(value: TaskListPresentation): void {
+  write(TASK_LIST_PRESENTATION_KEY, value);
+}
+
+export function getWorkspaceTaskSurface(): WorkspaceTaskSurface {
+  const value = read(WORKSPACE_TASK_SURFACE_KEY);
+  return value === "agent-work" || value === "board" ? value : "tasks";
+}
+
+export function setWorkspaceTaskSurface(value: WorkspaceTaskSurface): void {
+  write(WORKSPACE_TASK_SURFACE_KEY, value);
+}
+
+/**
+ * Animation styles are presentation-only and deliberately independent of the
+ * board mode. Switching away from animation preserves the last scene a person
+ * chose, so returning to it does not reset their workspace.
+ */
+export function isAnimationBoardStyle(value: unknown): value is AnimationBoardStyle {
+  return value === "pixel-agents" || value === "market-kline";
+}
+
+export function getAnimationBoardStyle(): AnimationBoardStyle {
+  const value = read(ANIMATION_BOARD_STYLE_KEY);
+  return isAnimationBoardStyle(value) ? value : "pixel-agents";
+}
+
+export function setAnimationBoardStyle(value: AnimationBoardStyle): void {
+  write(ANIMATION_BOARD_STYLE_KEY, value);
+}
+
+export function isMarketTimeframe(value: unknown): value is MarketTimeframe {
+  return value === "1m" || value === "5m" || value === "30m" || value === "1h" || value === "1d";
+}
+
+function marketTimeframeKey(projectKey: string): string | null {
+  const stableKey = projectKey.trim();
+  return stableKey ? `${MARKET_TIMEFRAME_PREFIX}${encodeURIComponent(stableKey)}` : null;
+}
+
+/**
+ * A K-line period belongs to one project market. Switching projects restores that
+ * project's last candle scale without changing the global animation-board style.
+ */
+export function getMarketTimeframe(projectKey: string): MarketTimeframe {
+  const key = marketTimeframeKey(projectKey);
+  if (!key) return "1h";
+  const value = read(key);
+  return isMarketTimeframe(value) ? value : "1h";
+}
+
+export function setMarketTimeframe(projectKey: string, value: MarketTimeframe): void {
+  const key = marketTimeframeKey(projectKey);
+  if (!key) return;
+  write(key, value);
+}
+
+function animationStyleMetadataKey(projectKey: string, style: AnimationBoardStyle): string | null {
+  const stableKey = projectKey.trim();
+  return stableKey
+    ? `${ANIMATION_STYLE_METADATA_PREFIX}${encodeURIComponent(stableKey)}:${style}`
+    : null;
+}
+
+function boundedMetadataNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.round(Math.min(maximum, Math.max(minimum, value)))
+    : fallback;
+}
+
+/**
+ * Animation tuning is machine-local, project-scoped, and style-scoped. New
+ * styles can reuse this envelope without changing task data or older records.
+ */
+export function getAnimationStyleMetadata(projectKey: string, style: AnimationBoardStyle): AnimationStyleMetadata {
+  const key = animationStyleMetadataKey(projectKey, style);
+  if (!key) return { ...DEFAULT_ANIMATION_STYLE_METADATA };
+
+  try {
+    const value: unknown = JSON.parse(read(key) ?? "null");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULT_ANIMATION_STYLE_METADATA };
+    const candidate = value as Partial<Record<keyof AnimationStyleMetadata, unknown>>;
+    return {
+      speed: boundedMetadataNumber(
+        candidate.speed,
+        DEFAULT_ANIMATION_STYLE_METADATA.speed,
+        ANIMATION_SPEED_MIN,
+        ANIMATION_SPEED_MAX,
+      ),
+      volatility: boundedMetadataNumber(
+        candidate.volatility,
+        DEFAULT_ANIMATION_STYLE_METADATA.volatility,
+        ANIMATION_VOLATILITY_MIN,
+        ANIMATION_VOLATILITY_MAX,
+      ),
+    };
+  } catch {
+    return { ...DEFAULT_ANIMATION_STYLE_METADATA };
+  }
+}
+
+export function setAnimationStyleMetadata(
+  projectKey: string,
+  style: AnimationBoardStyle,
+  metadata: AnimationStyleMetadata,
+): void {
+  const key = animationStyleMetadataKey(projectKey, style);
+  if (!key) return;
+  write(key, JSON.stringify({
+    speed: boundedMetadataNumber(
+      metadata.speed,
+      DEFAULT_ANIMATION_STYLE_METADATA.speed,
+      ANIMATION_SPEED_MIN,
+      ANIMATION_SPEED_MAX,
+    ),
+    volatility: boundedMetadataNumber(
+      metadata.volatility,
+      DEFAULT_ANIMATION_STYLE_METADATA.volatility,
+      ANIMATION_VOLATILITY_MIN,
+      ANIMATION_VOLATILITY_MAX,
+    ),
+  }));
+}
+
+const DEFAULT_FLOATING_BOARD: FloatingBoardPreference = {
+  open: false,
+  minimized: false,
+  pinned: false,
+  width: 520,
+  height: 420,
+};
+
+function finitePreferenceNumber(value: unknown, fallback?: number): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * The floating board is a workspace affordance rather than project data. Keeping a
+ * single machine-local record means switching projects replaces only its task feed;
+ * the window itself stays in the same place and state.
+ */
+export function getFloatingBoardPreference(): FloatingBoardPreference {
+  try {
+    const value: unknown = JSON.parse(read(FLOATING_BOARD_KEY) ?? "null");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULT_FLOATING_BOARD };
+    const candidate = value as Partial<Record<keyof FloatingBoardPreference, unknown>>;
+    return {
+      open: candidate.open === true,
+      minimized: candidate.minimized === true,
+      pinned: candidate.pinned === true,
+      x: finitePreferenceNumber(candidate.x),
+      y: finitePreferenceNumber(candidate.y),
+      width: Math.max(360, finitePreferenceNumber(candidate.width, DEFAULT_FLOATING_BOARD.width)!),
+      height: Math.max(280, finitePreferenceNumber(candidate.height, DEFAULT_FLOATING_BOARD.height)!),
+    };
+  } catch {
+    return { ...DEFAULT_FLOATING_BOARD };
+  }
+}
+
+export function setFloatingBoardPreference(value: FloatingBoardPreference): void {
+  write(FLOATING_BOARD_KEY, JSON.stringify({
+    open: value.open,
+    minimized: value.minimized,
+    pinned: value.pinned,
+    ...(typeof value.x === "number" && Number.isFinite(value.x) ? { x: value.x } : {}),
+    ...(typeof value.y === "number" && Number.isFinite(value.y) ? { y: value.y } : {}),
+    width: Math.max(360, value.width),
+    height: Math.max(280, value.height),
+  }));
 }
 
 function boardStatusSectionsKey(storageKey: string): string | null {

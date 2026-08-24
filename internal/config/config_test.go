@@ -64,6 +64,32 @@ func TestSaveRoundTrips(t *testing.T) {
 	}
 }
 
+func TestIdentityModeDefaultsOffAndRoundTrips(t *testing.T) {
+	path := writeConfig(t, sample)
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.IdentityMode {
+		t.Fatalf("old config unexpectedly enabled identity mode: %+v", loaded)
+	}
+	loaded.IdentityMode = true
+	if err := Save(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "identity_mode: true") {
+		t.Fatalf("identity mode was not persisted:\n%s", raw)
+	}
+	roundTrip, err := Load(path)
+	if err != nil || !roundTrip.IdentityMode {
+		t.Fatalf("identity mode round-trip = %+v err=%v", roundTrip, err)
+	}
+}
+
 func TestSavePreservesUnknownYAMLKeys(t *testing.T) {
 	body := sample + "future_feature:\n  enabled: true\n  note: preserve me\n"
 	path := writeConfig(t, body)

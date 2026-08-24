@@ -1,11 +1,14 @@
 import type { MouseEvent, ReactNode } from "react";
 import {
+  Bot,
+  CandlestickChart,
   Check,
   ChevronsDown,
   ChevronsUp,
   FilePlus2,
   FilterX,
   PanelsTopLeft,
+  PictureInPicture2,
   RefreshCw,
   Rows3,
   Search,
@@ -21,20 +24,25 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useI18n } from "@/lib/i18n";
-import type { BoardPresentation } from "@/lib/personalization";
+import type { AnimationBoardStyle, BoardPresentation, TaskListPresentation } from "@/lib/personalization";
 import { cn } from "@/lib/utils";
 
 type BoardBackgroundContextMenuProps = {
   children: ReactNode;
   className?: string;
+  surface: "tasks" | "agent-work" | "board";
   presentation: BoardPresentation;
+  animationStyle: AnimationBoardStyle;
+  floatingBoardOpen: boolean;
   onNewTask: () => void;
   onSearch: () => void;
   onRefresh: () => void;
   onExpandAll: () => void;
   onCollapseAll: () => void;
   onClearFilters?: () => void;
-  onPresentationChange: (presentation: BoardPresentation) => void;
+  onPresentationChange: (presentation: TaskListPresentation) => void;
+  onAnimationStyleChange: (style: AnimationBoardStyle) => void;
+  onFloatingBoardToggle?: () => void;
 };
 
 /**
@@ -46,7 +54,10 @@ type BoardBackgroundContextMenuProps = {
 export function BoardBackgroundContextMenu({
   children,
   className,
+  surface,
   presentation,
+  animationStyle,
+  floatingBoardOpen,
   onNewTask,
   onSearch,
   onRefresh,
@@ -54,6 +65,8 @@ export function BoardBackgroundContextMenu({
   onCollapseAll,
   onClearFilters,
   onPresentationChange,
+  onAnimationStyleChange,
+  onFloatingBoardToggle,
 }: BoardBackgroundContextMenuProps) {
   const { t } = useI18n();
   const ignoreTaskSurface = (event: MouseEvent<HTMLDivElement>) => {
@@ -100,31 +113,64 @@ export function BoardBackgroundContextMenu({
             </ContextMenuItem>
           )}
         </ContextMenuGroup>
+        {surface !== "board" && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuGroup>
+              <ContextMenuItem onSelect={onExpandAll}>
+                <ChevronsDown />
+                {t("Expand all sections", "展开全部分组")}
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={onCollapseAll}>
+                <ChevronsUp />
+                {t("Collapse all sections", "收起全部分组")}
+              </ContextMenuItem>
+            </ContextMenuGroup>
+          </>
+        )}
         <ContextMenuSeparator />
         <ContextMenuGroup>
-          <ContextMenuItem onSelect={onExpandAll}>
-            <ChevronsDown />
-            {t("Expand all sections", "展开全部分组")}
-          </ContextMenuItem>
-          <ContextMenuItem onSelect={onCollapseAll}>
-            <ChevronsUp />
-            {t("Collapse all sections", "收起全部分组")}
-          </ContextMenuItem>
+          <ContextMenuLabel>{surface === "board" ? t("Board style", "看板风格") : t("Task presentation", "任务展示")}</ContextMenuLabel>
+          {surface === "board" ? (
+            <>
+              <ContextMenuItem onSelect={() => onAnimationStyleChange("pixel-agents")}>
+                <Bot />
+                {t("Work floor", "工作风")}
+                {animationStyle === "pixel-agents" && <Check className="ml-auto" />}
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => onAnimationStyleChange("market-kline")}>
+                <CandlestickChart />
+                {t("Task K-line", "任务 K 线")}
+                {animationStyle === "market-kline" && <Check className="ml-auto" />}
+              </ContextMenuItem>
+            </>
+          ) : (
+            <>
+              <ContextMenuItem onSelect={() => onPresentationChange("row")}>
+                <Rows3 />
+                {t("Row mode", "行模式")}
+                {presentation === "row" && <Check className="ml-auto" />}
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => onPresentationChange("card")}>
+                <PanelsTopLeft />
+                {t("Card mode", "卡片模式")}
+                {presentation === "card" && <Check className="ml-auto" />}
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuGroup>
-        <ContextMenuSeparator />
-        <ContextMenuGroup>
-          <ContextMenuLabel>{t("Card presentation", "卡片样式")}</ContextMenuLabel>
-          <ContextMenuItem onSelect={() => onPresentationChange("row")}>
-            <Rows3 />
-            {t("Row mode", "行模式")}
-            {presentation === "row" && <Check className="ml-auto" />}
-          </ContextMenuItem>
-          <ContextMenuItem onSelect={() => onPresentationChange("card")}>
-            <PanelsTopLeft />
-            {t("Card mode", "卡片模式")}
-            {presentation === "card" && <Check className="ml-auto" />}
-          </ContextMenuItem>
-        </ContextMenuGroup>
+        {onFloatingBoardToggle && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuGroup>
+              <ContextMenuItem onSelect={onFloatingBoardToggle}>
+                <PictureInPicture2 />
+                {floatingBoardOpen ? t("Close floating window", "关闭悬浮窗") : t("Open floating window", "打开悬浮窗")}
+                {floatingBoardOpen && <Check className="ml-auto" />}
+              </ContextMenuItem>
+            </ContextMenuGroup>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );

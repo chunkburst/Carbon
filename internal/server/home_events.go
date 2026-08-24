@@ -90,6 +90,12 @@ type HomeHub struct {
 type homeRootWatch struct {
 	watcher *fsnotify.Watcher
 	subs    map[int]chan homeEvent
+
+	// See rootWatch: the final unsubscribe joins both goroutines so an fsnotify
+	// directory handle cannot outlive the Home stream on Windows.
+	done     chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 func NewHomeHub(debounce time.Duration) *HomeHub {
@@ -152,13 +158,22 @@ func (h *HomeHub) startWatcher(root string) (*homeRootWatch, error) {
 		return nil, fmt.Errorf("home watcher: watch metadata directory: %w", err)
 	}
 
-	rw := &homeRootWatch{watcher: w, subs: map[int]chan homeEvent{}}
+	rw := &homeRootWatch{
+		watcher: w,
+		subs:    map[int]chan homeEvent{},
+		done:    make(chan struct{}),
+	}
 	raw := make(chan struct{}, 1)
+	rw.wg.Add(1)
 	go func() {
+		defer rw.wg.Done()
 		defer close(raw)
-		for {
+
+		events := w.Events
+		errs := w.Errors
+		for events != nil || errs != nil {
 			select {
-			case event, ok := <-w.Events:
+			case event, ok := <-events:
 				if !ok {
 					return
 				}
@@ -171,21 +186,27 @@ func (h *HomeHub) startWatcher(root string) (*homeRootWatch, error) {
 				case raw <- struct{}{}:
 				default:
 				}
-			case _, ok := <-w.Errors:
+			case _, ok := <-errs:
 				if !ok {
-					return
+					errs = nil
 				}
-				// fsnotify errors are advisory. The next durable commit will be
-				// independently revalidated before a hint is sent.
+				// fsnotify errors are advisory. A later durable commit is independently
+				// revalidated before a catalog hint is emitted.
+			case <-rw.done:
+				return
 			}
 		}
 	}()
-	go coalesceHome(raw, h.debounce, func() {
-		if !homeManifestReadable(root) {
-			return
-		}
-		h.broadcast(root, rw, homeEvent{Type: evtCatalogChanged})
-	})
+	rw.wg.Add(1)
+	go func() {
+		defer rw.wg.Done()
+		coalesceHome(raw, h.debounce, func() {
+			if !homeManifestReadable(root) {
+				return
+			}
+			h.broadcast(root, rw, homeEvent{Type: evtCatalogChanged})
+		})
+	}()
 
 	return rw, nil
 }
@@ -253,9 +274,9 @@ func coalesceHome(in <-chan struct{}, debounce time.Duration, emit func()) {
 
 func (h *HomeHub) unsubscribe(root string, id int) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	rw := h.roots[root]
 	if rw == nil {
+		h.mu.Unlock()
 		return
 	}
 	if ch, ok := rw.subs[id]; ok {
@@ -263,9 +284,22 @@ func (h *HomeHub) unsubscribe(root string, id int) {
 		close(ch)
 	}
 	if len(rw.subs) == 0 {
-		_ = rw.watcher.Close()
 		delete(h.roots, root)
+		h.mu.Unlock()
+		// coalesceHome can call broadcast, which acquires h.mu. Join only after
+		// removing the root and releasing that mutex.
+		rw.stopAndWait()
+		return
 	}
+	h.mu.Unlock()
+}
+
+func (rw *homeRootWatch) stopAndWait() {
+	rw.stopOnce.Do(func() {
+		close(rw.done)
+		_ = rw.watcher.Close()
+	})
+	rw.wg.Wait()
 }
 
 func (h *HomeHub) broadcast(root string, source *homeRootWatch, event homeEvent) {

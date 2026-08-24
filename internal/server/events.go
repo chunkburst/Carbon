@@ -73,7 +73,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return // client disconnected / server shutting down
-		case e := <-ch:
+		case e, ok := <-ch:
+			if !ok {
+				return
+			}
 			if !eventVisibleToScope(scope, e, includeAll) {
 				continue
 			}
@@ -281,6 +284,13 @@ func NewHub(debounce time.Duration) *Hub {
 type rootWatch struct {
 	watcher *fsnotify.Watcher
 	subs    map[int]chan Event
+
+	// done is closed before the fsnotify handle. It lets the reader stop even if it
+	// is currently trying to hand a burst to the coalescer, while wg makes the last
+	// unsubscribe wait until both watcher goroutines have released the TempDir.
+	done     chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 // Subscribe registers a subscriber for root, lazily starting its watcher. The returned
@@ -341,17 +351,48 @@ func (h *Hub) startWatcher(root string) (*rootWatch, error) {
 		}
 	}
 
-	rw := &rootWatch{watcher: w, subs: map[int]chan Event{}}
+	rw := &rootWatch{
+		watcher: w,
+		subs:    map[int]chan Event{},
+		done:    make(chan struct{}),
+	}
 
 	raw := make(chan string, 64)
+	rw.wg.Add(1)
 	go func() {
-		for ev := range w.Events {
-			// Renamed-into-place files arrive as Create; treat Create/Write/Remove alike.
-			raw <- ev.Name
+		defer rw.wg.Done()
+		defer close(raw)
+
+		events := w.Events
+		errs := w.Errors
+		for events != nil || errs != nil {
+			select {
+			case ev, ok := <-events:
+				if !ok {
+					return
+				}
+				// Renamed-into-place files arrive as Create; treat Create/Write/Remove alike.
+				select {
+				case raw <- ev.Name:
+				case <-rw.done:
+					return
+				}
+			case _, ok := <-errs:
+				if !ok {
+					errs = nil
+				}
+				// fsnotify errors are advisory. Keep consuming events until the watcher is
+				// stopped; otherwise an error burst can stall the platform watcher.
+			case <-rw.done:
+				return
+			}
 		}
-		close(raw)
 	}()
-	go coalesce(raw, h.debounce, func(e Event) { h.broadcast(root, e) })
+	rw.wg.Add(1)
+	go func() {
+		defer rw.wg.Done()
+		coalesce(raw, h.debounce, func(e Event) { h.broadcast(root, rw, e) })
+	}()
 
 	return rw, nil
 }
@@ -359,9 +400,9 @@ func (h *Hub) startWatcher(root string) (*rootWatch, error) {
 // unsubscribe removes a subscriber and, if it was the last for the root, stops the watcher.
 func (h *Hub) unsubscribe(root string, id int) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	rw := h.roots[root]
 	if rw == nil {
+		h.mu.Unlock()
 		return
 	}
 	if ch, ok := rw.subs[id]; ok {
@@ -369,18 +410,36 @@ func (h *Hub) unsubscribe(root string, id int) {
 		close(ch)
 	}
 	if len(rw.subs) == 0 {
-		rw.watcher.Close() // ends the read goroutine, which closes raw, which ends coalesce
 		delete(h.roots, root)
+		h.mu.Unlock()
+		// Do not wait while holding h.mu: coalesce may be inside broadcast and needs
+		// that mutex to observe that this root is gone.
+		rw.stopAndWait()
+		return
 	}
+	h.mu.Unlock()
+}
+
+// stopAndWait releases the platform watcher and joins every goroutine that can retain
+// a directory handle. fsnotify on Windows otherwise makes t.TempDir cleanup race a
+// still-running reader after the final SSE subscriber disconnects.
+func (rw *rootWatch) stopAndWait() {
+	rw.stopOnce.Do(func() {
+		close(rw.done)
+		_ = rw.watcher.Close()
+	})
+	rw.wg.Wait()
 }
 
 // broadcast delivers e to every subscriber of root, dropping for any slow subscriber whose
 // buffer is full rather than stalling the watcher.
-func (h *Hub) broadcast(root string, e Event) {
+func (h *Hub) broadcast(root string, source *rootWatch, e Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	rw := h.roots[root]
-	if rw == nil {
+	// A replacement subscription may have started after this source was removed.
+	// Never let a stale debounce signal cross into the new root watcher.
+	if rw != source {
 		return
 	}
 	for _, ch := range rw.subs {

@@ -42,12 +42,6 @@ func (s *Store) storeRoot() (string, error) {
 	// EnsureCarbonStore is idempotent and returns immediately for an already canonical
 	// tree, while old-only state is copied and verified before any Store path is used.
 	if err := repopkg.EnsureCarbonStore(root); err != nil {
-		// The repository migrator validates .carbon before Store-owned path resolution.
-		// Preserve its error chain while translating its canonical escape sentinel into
-		// the Store API's established ErrPathOutsideRoot contract.
-		if errors.Is(err, repopkg.ErrCarbonPathOutsideRoot) {
-			return "", fmt.Errorf("%w: %w", ErrPathOutsideRoot, err)
-		}
 		return "", err
 	}
 	return filepath.Clean(root), nil

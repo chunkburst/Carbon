@@ -12,11 +12,11 @@ function leaseLabel(task: Task, t: Translate): string | null {
   if (!lease) return null;
   if (lease.expiresAt) {
     const expires = new Date(lease.expiresAt).getTime();
-    if (!Number.isNaN(expires) && expires < Date.now()) return t("Lease expired", "租约已过期");
+    if (!Number.isNaN(expires) && expires < Date.now()) return t("Handoff expired", "接手状态已过期");
     const relative = timeAgo(lease.expiresAt);
-    return relative ? t("Lease · {time}", "租约 · {time}", { time: relative }) : t("Lease active", "租约有效");
+    return relative ? t("Handling · {time}", "接手中 · {time}", { time: relative }) : t("Being handled", "正在接手");
   }
-  return t("Lease active", "租约有效");
+  return t("Being handled", "正在接手");
 }
 
 export function TaskMetadata({ task, compact = false, className }: { task: Task; compact?: boolean; className?: string }) {
@@ -81,10 +81,10 @@ export function TaskMetadata({ task, compact = false, className }: { task: Task;
           <TooltipTrigger asChild>
             <Badge variant="outline" className="h-5 gap-1 px-1.5 text-[10px] font-medium text-warning">
               <UserRoundCheck />
-              {!compact && <span>{t(pendingClaims === 1 ? "{count} claim" : "{count} claims", "{count} 个认领申请", { count: pendingClaims })}</span>}
+              {!compact && <span>{t(pendingClaims === 1 ? "{count} handoff request" : "{count} handoff requests", "{count} 个接手申请", { count: pendingClaims })}</span>}
             </Badge>
           </TooltipTrigger>
-          <TooltipContent>{t(pendingClaims === 1 ? "{count} pending assignment claim" : "{count} pending assignment claims", "{count} 个待审批的负责人申请", { count: pendingClaims })}</TooltipContent>
+          <TooltipContent>{t(pendingClaims === 1 ? "{count} handoff request to review" : "{count} handoff requests to review", "{count} 个待确认的接手申请", { count: pendingClaims })}</TooltipContent>
         </Tooltip>
       )}
     </div>

@@ -141,6 +141,9 @@ func (svc *Service) BeginSession(ctx context.Context, in BeginSessionInput) (Ses
 	if err := svc.writeAllowed(taskDoc.Task); err != nil {
 		return SessionView{}, err
 	}
+	if err := svc.authorizeWorkerTask(taskDoc.Task, svc.actor); err != nil {
+		return SessionView{}, err
+	}
 	worktree, err := svc.resolveTaskWorktree(taskDoc.Task, in.Worktree)
 	if err != nil {
 		return SessionView{}, err
@@ -168,6 +171,9 @@ func (svc *Service) BeginSession(ctx context.Context, in BeginSessionInput) (Ses
 			return err
 		}
 		if err := svc.writeAllowed(doc.Task); err != nil {
+			return err
+		}
+		if err := svc.authorizeWorkerTaskTx(tx, doc.Task, svc.actor); err != nil {
 			return err
 		}
 		existing, err := tx.FindSessionByIdempotency(in.TaskID, in.IdempotencyKey)

@@ -42,6 +42,7 @@ func TestServerInitializeInstructionsDescribeStableV2Contract(t *testing.T) {
 		"Use identity first", "fixed actor", "include_cluster=true", "expected_version",
 		"set_blocker", "add_evidence", "remove_evidence", "worker_private", "project_public",
 		"global_public", "Carbon v2 is the approved stable layer",
+		"Identity Mode", "worklog_draft_send", "identity-draft",
 		"historical claim tool is registered only for frozen legacy v1", "v1 is the frozen LegacyLayer",
 	} {
 		if !strings.Contains(result.Instructions, want) {

@@ -38,7 +38,15 @@ type Manager struct {
 	Store      *store.Store
 	Now        func() time.Time
 	DefaultTTL time.Duration
+	// Authorize is an optional Service-layer policy hook. Lease remains the single
+	// durable ownership primitive, while callers can enforce a task/actor policy
+	// inside the same Store.Write transaction before a new holder is recorded.
+	Authorize TaskAuthorizer
 }
+
+// TaskAuthorizer receives the current task while Manager already holds Store.Write.
+// It must not open a nested Store.Write transaction. Nil preserves legacy behavior.
+type TaskAuthorizer func(tx *store.WriteTx, current task.Task, actor string) error
 
 func New(s *store.Store, now func() time.Time, defaultTTL time.Duration) *Manager {
 	if now == nil {
@@ -55,6 +63,13 @@ func (m *Manager) now() time.Time {
 		return time.Now().UTC()
 	}
 	return m.Now().UTC()
+}
+
+func (m *Manager) authorize(tx *store.WriteTx, current task.Task, actor string) error {
+	if m == nil || m.Authorize == nil {
+		return nil
+	}
+	return m.Authorize(tx, current, actor)
 }
 
 func (m *Manager) ttl(value time.Duration) (time.Duration, error) {
@@ -158,6 +173,9 @@ func (m *Manager) Claim(ctx context.Context, input ClaimInput) (ClaimResult, err
 	err = m.Store.Write(ctx, input.Actor, "claim task lease", func(tx *store.WriteTx) error {
 		doc, err := tx.GetTask(input.TaskID)
 		if err != nil {
+			return err
+		}
+		if err := m.authorize(tx, doc.Task, input.Actor); err != nil {
 			return err
 		}
 		if err := doc.MatchVersion(input.ExpectedVersion); err != nil {
@@ -363,6 +381,11 @@ func (m *Manager) Reassign(ctx context.Context, input ReassignInput) (*store.Doc
 		if err != nil {
 			return err
 		}
+		if strings.TrimSpace(input.Assignee) != "" {
+			if err := m.authorize(tx, doc.Task, input.Assignee); err != nil {
+				return err
+			}
+		}
 		if err := doc.MatchVersion(input.ExpectedVersion); err != nil {
 			return err
 		}
@@ -435,6 +458,11 @@ func (m *Manager) Approve(ctx context.Context, input ApproveInput) (*store.Doc, 
 		request, found := findRequest(doc.Task.PendingClaims, input.RequestID)
 		if !found {
 			return fmt.Errorf("%w: %s", ErrRequestNotFound, input.RequestID)
+		}
+		if input.Approve {
+			if err := m.authorize(tx, doc.Task, request.Actor); err != nil {
+				return err
+			}
 		}
 		if !input.Approve {
 			doc.SetPendingClaims(removeRequest(doc.Task.PendingClaims, input.RequestID))

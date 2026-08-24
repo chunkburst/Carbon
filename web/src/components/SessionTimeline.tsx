@@ -90,7 +90,7 @@ function SessionCard({ session }: { session: AgentSession }) {
             in the header might not be obvious enough. */}
         {isLive && heartbeat && (
           <span className="flex items-center gap-1">
-            <Timer className="size-3" /> {t("Heartbeat {time}", "心跳 {time}", { time: timeAgo(heartbeat) })}
+            <Timer className="size-3" /> {t("Last update {time}", "最近反馈 {time}", { time: timeAgo(heartbeat) })}
           </span>
         )}
       </div>
@@ -101,10 +101,10 @@ function SessionCard({ session }: { session: AgentSession }) {
 function HealthBadge({ health }: { health: AgentSession["health"] }) {
   const { t } = useI18n();
   const label = {
-    active: t("active", "活跃"),
-    stalled: t("stalled", "已停滞"),
+    active: t("working", "进行中"),
+    stalled: t("needs attention", "暂时停滞"),
     finished: t("finished", "已完成"),
-    canceled: t("canceled", "已取消"),
+    canceled: t("stopped", "已停止"),
   }[health];
   return (
     <Badge

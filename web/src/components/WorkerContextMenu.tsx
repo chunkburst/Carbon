@@ -75,14 +75,14 @@ export function WorkerContextMenu({
         <ContextMenuGroup>
           <ContextMenuItem disabled={!onOpenWorker} onSelect={() => onOpenWorker?.(actor)}>
             <ExternalLink />
-            {t("Open Worker", "打开 Worker")}
+            {t("Open agent profile", "打开智能体档案")}
           </ContextMenuItem>
         </ContextMenuGroup>
         <ContextMenuSeparator />
         <ContextMenuGroup>
-          <ContextMenuItem onSelect={() => void copy(actor, t("Canonical actor copied", "Canonical actor 已复制"))}>
+          <ContextMenuItem onSelect={() => void copy(actor, t("Connection ID copied", "连接标识已复制"))}>
             <ClipboardCopy />
-            {t("Copy canonical actor", "复制 Canonical actor")}
+            {t("Copy connection ID", "复制连接标识")}
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => void copy(displayName, t("Display name copied", "显示名称已复制"))}>
             <Text />
@@ -92,9 +92,9 @@ export function WorkerContextMenu({
         {hasManagementActions && <ContextMenuSeparator />}
         {hasManagementActions && (
           <ContextMenuGroup>
-            {onEditAlias && <ContextMenuItem disabled={pending} onSelect={onEditAlias}><Pencil />{t("Edit alias", "编辑别名")}</ContextMenuItem>}
-            {onReset && <ContextMenuItem disabled={pending} onSelect={onReset}><RotateCcw />{t("Reset metrics", "重置指标")}</ContextMenuItem>}
-            {onDelete && <ContextMenuItem variant="destructive" disabled={pending} onSelect={onDelete}><UserRoundX />{t("Delete Worker", "删除 Worker")}</ContextMenuItem>}
+            {onEditAlias && <ContextMenuItem disabled={pending} onSelect={onEditAlias}><Pencil />{t("Edit display name", "编辑显示名称")}</ContextMenuItem>}
+            {onReset && <ContextMenuItem disabled={pending} onSelect={onReset}><RotateCcw />{t("Restart work statistics", "重新统计工作数据")}</ContextMenuItem>}
+            {onDelete && <ContextMenuItem variant="destructive" disabled={pending} onSelect={onDelete}><UserRoundX />{t("Remove from team", "移出智能体团队")}</ContextMenuItem>}
           </ContextMenuGroup>
         )}
       </ContextMenuContent>

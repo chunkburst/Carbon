@@ -1,30 +1,45 @@
 import { useMemo, useState } from "react";
-import { Activity, Clock3, ListChecks, RefreshCw, UsersRound } from "lucide-react";
+import { Activity, ClipboardList, Clock3, Gauge, History, ListChecks, RefreshCw, ShieldCheck, UsersRound } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkLogDetailsDialog } from "@/components/WorkLogDetailsDialog";
 import { WorkLogTable } from "@/components/WorkLogTable";
 import { recentWorkTaskNavigationTarget, type TaskNavigationTarget, type WorkLog } from "@/components/WorkLogTypes";
-import { WorkerIdentity } from "@/components/WorkerIdentity";
-import { WorkerContextMenu } from "@/components/WorkerContextMenu";
-import type { CarbonHomeCluster, CarbonScopeInput, CarbonWorkerMetric, CarbonWorkerRecentWork } from "@/lib/carbon-api";
-import { useCarbonWorkLogs, useWorkerMetrics } from "@/lib/queries";
+import type { CarbonHomeCluster, CarbonScopeInput, CarbonWorkerIdentity, CarbonWorkerMetric, CarbonWorkerRecentWork } from "@/lib/carbon-api";
+import { useCarbonWorkLogs, useCarbonWorkerIdentities, useWorkerAliases, useWorkerMetrics } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
-import { cn, timeAgo } from "@/lib/utils";
-import { useWorkerAliasFormatter } from "@/lib/worker-aliases";
+import { carbonTaskTypeLabel } from "@/lib/task-labels";
+import { cn, initials, timeAgo } from "@/lib/utils";
+import { formatWorkerActor } from "@/lib/worker-aliases";
 
 export type OwnerLogsProps = {
   home?: string;
   carbonScope?: CarbonScopeInput;
   clusters?: CarbonHomeCluster[];
-  /** Omit for the Worker log directory; provide a canonical actor for profile mode. */
+  /** Omit for the Work Log ledger; provide a canonical actor for profile mode. */
   actor?: string;
   onOpenWorker?: (actor: string) => void;
   onOpenTask?: (target: TaskNavigationTarget) => void;
 };
 
 /**
- * Route-friendly Worker log directory and profile view. It uses the same compact
- * table/timeline vocabulary as Carbon rather than a dashboard card wall.
+ * A Worker profile is an audit-focused dossier: capability, present task load,
+ * attributed task records, then durable Work Logs. The no-actor route is the
+ * Work Log ledger only; it deliberately does not duplicate the Worker directory.
  */
 export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }: OwnerLogsProps) {
   const { t } = useI18n();
@@ -47,9 +62,15 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
       ...(projectId ? { projectId } : {}),
     };
   }, [carbonBase?.clusterId, carbonBase?.projectId]);
+  const identityScope = useMemo<CarbonScopeInput>(() => {
+    if (!carbonBase) return carbonScope ?? "";
+    if (carbonBase.home && carbonBase.clusterId) return { home: carbonBase.home, clusterId: carbonBase.clusterId };
+    if (carbonBase.home && carbonBase.projectId) return { home: carbonBase.home, projectId: carbonBase.projectId };
+    return carbonBase;
+  }, [carbonBase, carbonScope]);
   const metrics = useWorkerMetrics(statsScope, statsMode);
-  // An independent project is a valid Work Log anchor; retain its project ID
-  // instead of inventing a cluster for the read-only Worker profile.
+  const identitiesQuery = useCarbonWorkerIdentities(identityScope, Boolean(identityScope));
+  const aliasesQuery = useWorkerAliases(resolvedHome);
   const logScope = useMemo<CarbonScopeInput>(() => {
     if (typeof carbonScope === "string") return carbonScope;
     if (!carbonBase) return "";
@@ -62,6 +83,17 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
     [metrics.data],
   );
   const metric = useMemo(() => workers.find((worker) => worker.actor === actor), [actor, workers]);
+  const identity = useMemo<CarbonWorkerIdentity | undefined>(
+    () => identitiesQuery.data?.available && identitiesQuery.data.data.modeEnabled
+      ? identitiesQuery.data.data.records?.find((record) => record.actor === actor)
+      : undefined,
+    [actor, identitiesQuery.data],
+  );
+  const identityAvailable = identitiesQuery.data?.available === true;
+  const identityModeEnabled = identitiesQuery.data?.data?.modeEnabled === true;
+  const aliases = aliasesQuery.data?.available ? aliasesQuery.data.data.aliases : {};
+  const displayName = actor ? formatWorkerActor(actor, aliases) : "";
+  const highestActiveLoad = useMemo(() => Math.max(1, ...workers.map((worker) => worker.active)), [workers]);
   const logs = useMemo<WorkLog[]>(
     () => logsQuery.data?.available ? logsQuery.data.data.worklogs as WorkLog[] : [],
     [logsQuery.data],
@@ -71,35 +103,65 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
   if (actor) {
     return (
       <div className="flex h-full min-w-0 flex-col bg-panel">
-        <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <UsersRound className="size-4 shrink-0 text-brand" />
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold">{t("Worker profile", "Worker 档案")}</h1>
-              <WorkerIdentity actor={actor} active={(metric?.active ?? 0) > 0} />
-            </div>
+        <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b px-4 py-2">
+          <UsersRound className="size-4 shrink-0 text-brand" />
+          <div className="min-w-0">
+            <h1 className="text-sm font-semibold">{t("Agent profile", "智能体档案")}</h1>
+            <p className="truncate text-xs text-muted-foreground">{t("Execution agent, task activity, and work logs", "执行智能体、任务参与记录和工作日志")}</p>
           </div>
-          <span className="font-mono text-[10px] text-muted-foreground">{actor}</span>
         </header>
         <div className="min-w-0 flex-1 overflow-y-auto">
           {!metrics.data?.available && !metrics.isLoading && (
-            <Alert className="m-4 mb-0"><AlertTitle>{t("Worker metrics need Carbon stable v2", "Worker 指标需要 Carbon stable v2")}</AlertTitle><AlertDescription>{t("Carbon does not infer profile metrics from incomplete legacy task records.", "Carbon 不会从不完整的旧任务记录推测档案指标。")}</AlertDescription></Alert>
+            <Alert className="m-4 mb-0">
+              <AlertTitle>{t("Work statistics are not available yet", "工作统计暂不可用")}</AlertTitle>
+              <AlertDescription>{t("Carbon does not guess profile statistics from incomplete task records.", "Carbon 不会根据不完整的任务记录猜测档案数据。")}</AlertDescription>
+            </Alert>
           )}
-          <WorkerMetricStrip worker={metric} />
-          <section className="border-b">
-            <SectionHeading title={t("Recent work", "最近工作")} detail={t("Latest task activity attributed to this Worker", "归属此 Worker 的最新任务活动")} />
-            <RecentWorkTimeline items={metric?.recentWork ?? metric?.recent_work ?? []} sourceScope={recentWorkSourceScope} onOpenTask={onOpenTask} />
-          </section>
-          <section className="min-w-0">
-            <SectionHeading title="Work Logs" detail={t("Operational notes and complete audit fields", "运营记录与完整审计字段")} count={logs.length} />
-            {!hasLogScope ? (
-              <p className="px-4 py-8 text-sm text-muted-foreground">{t("Choose a cluster before reading Work Logs.", "请选择集群后再读取 Work Logs。")}</p>
-            ) : logsQuery.isLoading ? <LogSkeleton /> : logsQuery.data?.available ? (
-              <div className="overflow-auto"><WorkLogTable logs={logs} compact onOpenTask={onOpenTask} onOpenWorker={onOpenWorker} onView={setViewLog} /></div>
-            ) : (
-              <p className="px-4 py-8 text-sm text-muted-foreground">{t("This Carbon sidecar does not expose Work Logs.", "当前 Carbon sidecar 未提供 Work Logs。")}</p>
-            )}
-          </section>
+
+          <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
+            <WorkerProfileSummary
+              actor={actor}
+              displayName={displayName}
+              metric={metric}
+              identity={identity}
+              identityAvailable={identityAvailable}
+              identityModeEnabled={identityModeEnabled}
+              highestActiveLoad={highestActiveLoad}
+            />
+
+            <Tabs defaultValue="work">
+                <TabsList aria-label={t("Agent profile sections", "智能体档案分区")}>
+                <TabsTrigger value="work"><ClipboardList />{t("Task work", "任务工作")}</TabsTrigger>
+                <TabsTrigger value="logs"><History />{t("Work logs", "工作日志")}</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="work" className="mt-3">
+                <Card size="sm">
+                  <CardHeader>
+                    <CardTitle>{t("Recent task activity", "最近参与的任务")}</CardTitle>
+                    <CardDescription>{t("Tasks this agent recently contributed to. This is not an online indicator.", "这里展示该智能体最近参与的任务，不代表当前在线状态。")}</CardDescription>
+                    <CardAction><Badge variant="outline">{metric?.recentWork?.length ?? metric?.recent_work?.length ?? 0}</Badge></CardAction>
+                  </CardHeader>
+                  <CardContent>
+                    {metrics.isLoading ? <RecentWorkSkeleton /> : <RecentWorkTimeline items={metric?.recentWork ?? metric?.recent_work ?? []} sourceScope={recentWorkSourceScope} onOpenTask={onOpenTask} />}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="logs" className="mt-3">
+                <WorkLogsPanel
+                  logs={logs}
+                  loading={logsQuery.isLoading}
+                  available={logsQuery.data?.available === true}
+                  hasLogScope={hasLogScope}
+                  onOpenWorker={onOpenWorker}
+                  onOpenTask={onOpenTask}
+                  onView={setViewLog}
+                  compact
+                />
+              </TabsContent>
+            </Tabs>
+          </main>
         </div>
         <WorkLogDetailsDialog open={viewLog !== null} onOpenChange={(open) => !open && setViewLog(null)} log={viewLog} onOpenTask={onOpenTask} onOpenWorker={onOpenWorker} />
       </div>
@@ -108,49 +170,148 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-panel">
-      <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <UsersRound className="size-4 shrink-0 text-brand" />
-          <div className="min-w-0"><h1 className="text-sm font-semibold">{t("Worker log directory", "Worker 日志目录")}</h1><p className="truncate text-xs text-muted-foreground">{t("Open a Worker to inspect delivery metrics and Work Logs", "打开一个 Worker 查看交付指标和 Work Logs")}</p></div>
+      <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b px-4 py-2">
+        <History className="size-4 shrink-0 text-brand" />
+        <div className="min-w-0">
+          <h1 className="text-sm font-semibold">{t("Work log history", "工作日志")}</h1>
+          <p className="truncate text-xs text-muted-foreground">{t("Review team updates or open the related agent profile", "查看团队工作记录，或从记录打开对应的智能体档案")}</p>
         </div>
       </header>
       <div className="min-w-0 flex-1 overflow-y-auto">
-        {!metrics.data?.available && !metrics.isLoading && <Alert className="m-4 mb-0"><AlertTitle>{t("Worker metrics need Carbon stable v2", "Worker 指标需要 Carbon stable v2")}</AlertTitle><AlertDescription>{t("The directory remains intentionally empty rather than inventing delivery statistics.", "目录会保持为空，而不会虚构交付统计数据。")}</AlertDescription></Alert>}
-        <section className="min-w-0 border-b">
-          <SectionHeading title="Worker" detail={t("Select a row to open the Worker profile", "选择一行以打开 Worker 档案")} count={workers.length} />
-          {metrics.isLoading ? <DirectorySkeleton /> : workers.length ? <WorkerDirectoryTable workers={workers} onOpenWorker={onOpenWorker} /> : metrics.data?.available ? <p className="px-4 py-10 text-sm text-muted-foreground">{t("No Worker activity in this scope yet.", "此范围内暂无 Worker 活动。")}</p> : null}
-        </section>
-        <section className="min-w-0">
-          <SectionHeading title={t("Recent Work Logs", "最近 Work Logs")} detail={t("Read-only preview; each entry exposes all audit attributes", "只读预览；每条记录均可查看全部审计属性")} count={logs.length} />
-          {!hasLogScope ? <p className="px-4 py-8 text-sm text-muted-foreground">{t("Choose a cluster before reading Work Logs.", "请选择集群后再读取 Work Logs。")}</p> : logsQuery.isLoading ? <LogSkeleton /> : logsQuery.data?.available ? <div className="overflow-auto"><WorkLogTable logs={logs} onOpenWorker={onOpenWorker} onOpenTask={onOpenTask} onView={setViewLog} /></div> : <p className="px-4 py-8 text-sm text-muted-foreground">{t("This Carbon sidecar does not expose Work Logs.", "当前 Carbon sidecar 未提供 Work Logs。")}</p>}
-        </section>
+        <main className="mx-auto w-full max-w-6xl p-4">
+          <WorkLogsPanel
+            logs={logs}
+            loading={logsQuery.isLoading}
+            available={logsQuery.data?.available === true}
+            hasLogScope={hasLogScope}
+            onOpenWorker={onOpenWorker}
+            onOpenTask={onOpenTask}
+            onView={setViewLog}
+          />
+        </main>
       </div>
       <WorkLogDetailsDialog open={viewLog !== null} onOpenChange={(open) => !open && setViewLog(null)} log={viewLog} onOpenTask={onOpenTask} onOpenWorker={onOpenWorker} />
     </div>
   );
 }
 
-function SectionHeading({ title, detail, count }: { title: string; detail: string; count?: number }) {
-  return <div className="flex min-h-10 items-center justify-between gap-3 border-b px-4 py-2"><div className="min-w-0"><h2 className="text-sm font-medium">{title}{count !== undefined && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{count}</span>}</h2><p className="truncate text-xs text-muted-foreground">{detail}</p></div></div>;
-}
-
-function WorkerMetricStrip({ worker }: { worker?: CarbonWorkerMetric }) {
+function WorkerProfileSummary({
+  actor,
+  displayName,
+  metric,
+  identity,
+  identityAvailable,
+  identityModeEnabled,
+  highestActiveLoad,
+}: {
+  actor: string;
+  displayName: string;
+  metric?: CarbonWorkerMetric;
+  identity?: CarbonWorkerIdentity;
+  identityAvailable: boolean;
+  identityModeEnabled: boolean;
+  highestActiveLoad: number;
+}) {
   const { t } = useI18n();
-  const completed = worker?.completed ?? Object.values(worker?.completedByPriority ?? worker?.completed_by_priority ?? {}).reduce<number>((sum, value) => sum + (value ?? 0), 0);
-  const cycle = worker?.averageCycleSeconds ?? worker?.average_cycle_seconds;
-  const reopen = worker?.reopenRate ?? worker?.reopen_rate;
+  const completed = metric?.completed ?? completedCount(metric?.completedByPriority ?? metric?.completed_by_priority);
+  const cycle = metric?.averageCycleSeconds ?? metric?.average_cycle_seconds;
+  const reopen = metric?.reopenRate ?? metric?.reopen_rate;
+  const active = metric?.active ?? 0;
+  const loadPercent = Math.min(100, Math.round((active / highestActiveLoad) * 100));
+
   return (
-    <dl className="grid grid-cols-2 border-b sm:grid-cols-4">
-      <Metric icon={Activity} label={t("Active", "活跃")} value={String(worker?.active ?? 0)} />
-      <Metric icon={ListChecks} label={t("Completed", "已完成")} value={String(completed)} />
-      <Metric icon={Clock3} label={t("Average cycle", "平均周期")} value={formatDuration(cycle)} />
-      <Metric icon={RefreshCw} label={t("Reopen rate", "重开率")} value={formatPercent(reopen)} />
-    </dl>
+    <Card>
+      <CardHeader>
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar size="lg">
+            <AvatarFallback>{initials(displayName || actor)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <CardTitle className="truncate">{displayName || actor}</CardTitle>
+            <CardDescription className="truncate font-mono text-[10px]">{actor}</CardDescription>
+          </div>
+        </div>
+        <CardDescription>{t("This is an execution agent profile. Each task shows its own task lead.", "这是执行智能体档案；每个任务会单独显示负责人。")}</CardDescription>
+        <CardAction><IdentityStatus identity={identity} identityAvailable={identityAvailable} identityModeEnabled={identityModeEnabled} /></CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(15rem,0.85fr)]" aria-label={t("Agent role and workload", "智能体角色与工作负载")}>
+          <WorkerCapability identity={identity} identityAvailable={identityAvailable} identityModeEnabled={identityModeEnabled} />
+          <div className="flex flex-col gap-2 rounded-xl bg-muted/45 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium"><Gauge className="size-3.5 text-muted-foreground" />{t("Current task load", "当前任务负载")}</span>
+              <Badge variant={active > 0 ? "secondary" : "outline"}>{t("{count} active", "{count} 个活跃", { count: active })}</Badge>
+            </div>
+            <Progress value={loadPercent} aria-label={t("{count} active tasks", "{count} 个活跃任务", { count: active })} />
+            <p className="text-[10px] text-muted-foreground">{t("Compared with the busiest agent in this range; this is not an online or availability signal.", "与当前范围内最忙的智能体相比；不代表在线或可用状态。")}</p>
+          </div>
+        </section>
+
+        <Separator />
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <ProfileMetric icon={Activity} label={t("Active tasks", "活跃任务")} value={String(active)} />
+          <ProfileMetric icon={ListChecks} label={t("Completed", "已完成")} value={String(completed)} />
+          <ProfileMetric icon={Clock3} label={t("Average completion time", "平均完成用时")} value={formatDuration(cycle)} />
+          <ProfileMetric icon={RefreshCw} label={t("Returned tasks", "返工率")} value={formatPercent(reopen)} />
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 
-function Metric({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
-  return <div className="flex min-h-16 items-center gap-2 border-r px-4 last:border-r-0"><Icon className="size-4 text-muted-foreground" /><div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="text-base font-semibold tabular-nums">{value}</dd></div></div>;
+function IdentityStatus({ identity, identityAvailable, identityModeEnabled }: {
+  identity?: CarbonWorkerIdentity;
+  identityAvailable: boolean;
+  identityModeEnabled: boolean;
+}) {
+  const { t } = useI18n();
+  if (!identityAvailable) return <Badge variant="outline">{t("Profile details unavailable", "身份信息暂不可用")}</Badge>;
+  if (!identityModeEnabled) return <Badge variant="outline">{t("Identity mode off", "身份模式未启用")}</Badge>;
+  if (!identity) return <Badge variant="outline">{t("Profile not set", "档案待设置")}</Badge>;
+  return <Badge variant="secondary">{identity.role}</Badge>;
+}
+
+function WorkerCapability({ identity, identityAvailable, identityModeEnabled }: {
+  identity?: CarbonWorkerIdentity;
+  identityAvailable: boolean;
+  identityModeEnabled: boolean;
+}) {
+  const { t } = useI18n();
+  if (!identityAvailable) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="flex items-center gap-1.5 text-xs font-medium"><ShieldCheck className="size-3.5 text-muted-foreground" />{t("Role and task types", "角色与可接任务")}</span>
+        <p className="text-sm text-muted-foreground">{t("This Carbon installation does not provide agent profile details yet.", "当前 Carbon 服务暂未提供智能体身份详情。")}</p>
+      </div>
+    );
+  }
+  if (!identity || !identityModeEnabled) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="flex items-center gap-1.5 text-xs font-medium"><ShieldCheck className="size-3.5 text-muted-foreground" />{t("Role and task types", "角色与可接任务")}</span>
+        <p className="text-sm text-muted-foreground">{identityModeEnabled ? t("This agent has not set a role or task types yet.", "此智能体尚未设置角色或可接任务类型。") : t("Role mode is off, so this project does not limit which task types an agent can take.", "身份模式未启用，因此项目不会限制智能体可接手的任务类型。")}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="flex items-center gap-1.5 text-xs font-medium"><ShieldCheck className="size-3.5 text-muted-foreground" />{t("Role and task types", "角色与可接任务")}</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="secondary">{identity.role}</Badge>
+        {identity.types.map((type) => <Badge key={type} variant="outline">{carbonTaskTypeLabel(type, t)}</Badge>)}
+      </div>
+      <p className="text-[10px] text-muted-foreground">{t("When role mode is on, these task types are checked when work is taken over or handed off.", "启用身份模式后，接手或转交任务时会检查这些任务类型。")}</p>
+    </div>
+  );
+}
+
+function ProfileMetric({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-xl bg-muted/45 px-3 py-2.5">
+      <dt className="flex items-center gap-1 text-xs text-muted-foreground"><Icon className="size-3.5 shrink-0" />{label}</dt>
+      <dd className="mt-0.5 truncate text-base font-semibold tabular-nums">{value}</dd>
+    </div>
+  );
 }
 
 function RecentWorkTimeline({
@@ -163,23 +324,33 @@ function RecentWorkTimeline({
   onOpenTask?: (target: TaskNavigationTarget) => void;
 }) {
   const { t } = useI18n();
-  if (!items.length) return <p className="px-4 py-8 text-sm text-muted-foreground">{t("No recent task activity.", "暂无最近任务活动。")}</p>;
+  if (!items.length) {
+    return (
+      <Empty className="min-h-48 border-0 p-6">
+        <EmptyHeader>
+          <EmptyMedia variant="icon"><ClipboardList /></EmptyMedia>
+          <EmptyTitle>{t("No task activity yet", "暂时没有任务动态")}</EmptyTitle>
+          <EmptyDescription>{t("Task updates involving this agent will appear here.", "与此智能体相关的任务更新会显示在这里。")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
   return (
-    <ol className="divide-y">
-      {items.slice(0, 12).map((item) => {
+    <ol className="flex flex-col gap-1">
+      {items.slice(0, 16).map((item) => {
         const taskTarget = recentWorkTaskNavigationTarget(item, sourceScope);
         return (
-          <li key={`${item.taskId}:${item.at}`} className="grid grid-cols-[5.5rem_minmax(0,1fr)_6rem] items-center gap-3 px-4 py-2 text-sm">
+          <li key={`${item.taskId}:${item.at}`}>
             <button
               type="button"
               disabled={!onOpenTask || !taskTarget}
               onClick={() => taskTarget && onOpenTask?.(taskTarget)}
-              className={cn("truncate text-left font-mono text-xs", onOpenTask && taskTarget && "text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+              className={cn("grid w-full grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2 text-left", onOpenTask && taskTarget && "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
             >
-              {item.taskId}
+              <span className="truncate font-mono text-[10px] text-muted-foreground">{item.taskId}</span>
+              <span className="min-w-0"><span className="block truncate text-sm font-medium">{item.title}</span><span className="block truncate text-xs text-muted-foreground">{item.activity || item.status}</span></span>
+              <time className="text-right text-xs text-muted-foreground">{timeAgo(item.at)}</time>
             </button>
-            <span className="min-w-0"><span className="block truncate font-medium">{item.title}</span><span className="block truncate text-xs text-muted-foreground">{item.activity || item.status}</span></span>
-            <time className="text-right text-xs text-muted-foreground">{timeAgo(item.at)}</time>
           </li>
         );
       })}
@@ -187,36 +358,77 @@ function RecentWorkTimeline({
   );
 }
 
-function WorkerDirectoryTable({ workers, onOpenWorker }: { workers: CarbonWorkerMetric[]; onOpenWorker?: (actor: string) => void }) {
+function WorkLogsPanel({
+  logs,
+  loading,
+  available,
+  hasLogScope,
+  onOpenWorker,
+  onOpenTask,
+  onView,
+  compact = false,
+}: {
+  logs: WorkLog[];
+  loading: boolean;
+  available: boolean;
+  hasLogScope: boolean;
+  onOpenWorker?: (actor: string) => void;
+  onOpenTask?: (target: TaskNavigationTarget) => void;
+  onView: (log: WorkLog) => void;
+  compact?: boolean;
+}) {
   const { t } = useI18n();
-  const formatWorker = useWorkerAliasFormatter();
   return (
-    <table className="w-full min-w-[660px] text-[13px]">
-      <thead className="border-b text-left text-xs text-muted-foreground"><tr><th className="h-8 px-4 font-medium">Worker</th><th className="h-8 w-24 font-medium">{t("Active", "活跃")}</th><th className="h-8 w-28 font-medium">{t("Completed", "已完成")}</th><th className="h-8 w-28 font-medium">{t("Cycle", "周期")}</th><th className="h-8 w-32 font-medium">{t("Last activity", "最后活动")}</th></tr></thead>
-      <tbody>
-        {workers.map((worker) => (
-          <WorkerContextMenu key={worker.actor} actor={worker.actor} displayName={formatWorker(worker.actor)} onOpenWorker={onOpenWorker}>
-            <tr
-              tabIndex={0}
-              data-carbon-context-surface
-              aria-label={t("Worker {actor}", "Worker {actor}", { actor: worker.actor })}
-              className="border-b transition-colors hover:bg-muted/30"
-            >
-              <td className="px-4 py-2"><button type="button" disabled={!onOpenWorker} onClick={() => onOpenWorker?.(worker.actor)} className={cn("block min-w-0 text-left", onOpenWorker && "rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}><WorkerIdentity actor={worker.actor} active={worker.active > 0} /></button></td>
-              <td className={cn("py-2 font-medium", worker.active > 0 && "text-success")}>{worker.active}</td>
-              <td className="py-2">{worker.completed || Object.values(worker.completedByPriority ?? worker.completed_by_priority ?? {}).reduce<number>((sum, value) => sum + (value ?? 0), 0)}</td>
-              <td className="py-2 font-mono text-xs">{formatDuration(worker.averageCycleSeconds ?? worker.average_cycle_seconds)}</td>
-              <td className="py-2 text-xs text-muted-foreground">{timeAgo(worker.lastActivity ?? worker.last_activity ?? "") || "—"}</td>
-            </tr>
-          </WorkerContextMenu>
-        ))}
-      </tbody>
-    </table>
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>{t("Work logs", "工作日志")}</CardTitle>
+        <CardDescription>{t("Saved notes about progress, decisions, and handoffs", "记录进展、决策和交接的工作笔记")}</CardDescription>
+        <CardAction><Badge variant="outline">{logs.length}</Badge></CardAction>
+      </CardHeader>
+      <CardContent>
+        {!hasLogScope ? (
+          <LedgerEmptyState title={t("Choose a project", "请选择项目")} detail={t("Work logs are available for a selected project or project group.", "选择项目或项目集群后即可查看工作日志。")}/>
+        ) : loading ? <WorkLogSkeleton /> : available ? (
+          logs.length ? <div className="overflow-auto"><WorkLogTable logs={logs} compact={compact} onOpenTask={onOpenTask} onOpenWorker={onOpenWorker} onView={onView} /></div> : <LedgerEmptyState title={t("No work logs yet", "暂时没有工作日志")} detail={t("New notes will appear here as agents record their work.", "智能体写下新的工作记录后，会显示在这里。")}/>
+        ) : (
+          <LedgerEmptyState title={t("Work logs unavailable", "工作日志暂不可用")} detail={t("This Carbon installation does not provide work logs for the selected project.", "当前 Carbon 服务未向所选项目提供工作日志。")}/>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
-function DirectorySkeleton() { return <div className="space-y-px">{Array.from({ length: 6 }, (_, index) => <div key={index} className="grid h-14 grid-cols-[1fr_6rem_7rem_7rem_8rem] gap-3 border-b px-4"><span className="my-auto h-5 w-36 animate-pulse rounded bg-muted" /><span className="my-auto h-4 w-9 animate-pulse rounded bg-muted" /><span className="my-auto h-4 w-10 animate-pulse rounded bg-muted" /><span className="my-auto h-4 w-12 animate-pulse rounded bg-muted" /></div>)}</div>; }
-function LogSkeleton() { return <div className="space-y-px">{Array.from({ length: 4 }, (_, index) => <div key={index} className="grid h-14 grid-cols-[6rem_12rem_minmax(16rem,1fr)_8rem] gap-3 border-b px-4"><span className="my-auto h-4 w-12 animate-pulse rounded bg-muted" /><span className="my-auto h-5 w-28 animate-pulse rounded bg-muted" /><span className="my-auto h-4 w-48 animate-pulse rounded bg-muted" /><span className="my-auto h-5 w-20 animate-pulse rounded bg-muted" /></div>)}</div>; }
+function LedgerEmptyState({ title, detail }: { title: string; detail: string }) {
+  return (
+    <Empty className="min-h-52 border-0 p-6">
+      <EmptyHeader>
+        <EmptyMedia variant="icon"><History /></EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{detail}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
+}
+
+function RecentWorkSkeleton() {
+  return (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="h-14 w-full" />)}
+    </div>
+  );
+}
+
+function WorkLogSkeleton() {
+  return (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-14 w-full" />)}
+    </div>
+  );
+}
+
+function completedCount(values?: Partial<Record<string, number>>): number {
+  return Object.values(values ?? {}).reduce<number>((sum, value) => sum + (value ?? 0), 0);
+}
 
 function formatDuration(value?: number): string {
   if (value === undefined || value === null || value < 0) return "—";

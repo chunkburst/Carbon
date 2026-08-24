@@ -35,14 +35,14 @@ export function CarbonTaskProperties({ path, task }: { path: string; task: Task 
   return (
     <section className="border-t pt-5">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">{t("Carbon fields", "Carbon 字段")}</h3>
+        <h3 className="text-sm font-medium">{t("Task properties", "任务属性")}</h3>
         <TaskMetadata task={task} compact />
       </div>
       {!available && (
         <Alert className="mb-4">
-          <AlertTitle>{t("Carbon stable v2 not available", "Carbon stable v2 不可用")}</AlertTitle>
+          <AlertTitle>{t("Task properties are not available yet", "任务属性暂不可编辑")}</AlertTitle>
           <AlertDescription>
-            {t("These fields are intentionally read-only until this sidecar advertises the Carbon API.", "在当前 sidecar 声明 Carbon API 前，这些字段会保持只读。")}
+            {t("Update Carbon to edit these task properties. They remain visible and safe in the meantime.", "更新 Carbon 后即可编辑这些属性；当前内容仍会安全保留。")}
           </AlertDescription>
         </Alert>
       )}
@@ -86,7 +86,7 @@ export function CarbonTaskProperties({ path, task }: { path: string; task: Task 
         onClick={() => patch.mutate({ id: task.id, fields: { projectId: projectId || undefined, type: type || undefined, importance: importance || undefined, expectedVersion: task.version } })}
       >
         <Save data-icon="inline-start" />
-        {t("Save Carbon fields", "保存 Carbon 字段")}
+        {t("Save properties", "保存属性")}
       </Button>
     </section>
   );

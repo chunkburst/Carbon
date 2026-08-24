@@ -12,6 +12,7 @@ import {
   ListChecks,
   Network,
   Moon,
+  PictureInPicture2,
   Plug,
   ScanEye,
   Search,
@@ -27,6 +28,7 @@ import type { Filter } from "@/components/AppSidebar";
 import type { CatalogIconMutation, CatalogPresentationIcons } from "@/components/CatalogIcon";
 import { CarbonProjectSwitcher } from "@/components/CarbonProjectSwitcher";
 import { CarbonTaskList } from "@/components/CarbonTaskList";
+import { CarbonFloatingBoard } from "@/components/CarbonFloatingBoard";
 import { WorkspaceBackgroundContextMenu } from "@/components/WorkspaceBackgroundContextMenu";
 import type { TaskNavigationTarget } from "@/components/WorkLogTypes";
 import { CarbonConnectPanel } from "@/pages/Connect";
@@ -82,6 +84,7 @@ import {
   useCarbonTaskEvents,
   useCreateCarbonView,
   useDeleteCarbonView,
+  useReorderCarbonTask,
   useTrashCarbonTasks,
   useTransitionCarbonTask,
 } from "@/lib/queries";
@@ -90,6 +93,24 @@ import { carbonStorageKey } from "@/lib/storage-identity";
 import { carbonImportanceLabel, carbonTaskTypeLabel } from "@/lib/task-labels";
 import { isMultiProjectCluster } from "@/lib/carbon-projects";
 import { getTheme, toggleTheme, type Theme } from "@/lib/theme";
+import {
+  closeFloatingBoard,
+  isTauri,
+  onFloatingBoardClosed,
+  openFloatingBoard,
+  type FloatingBoardTarget,
+} from "@/lib/desktop";
+import {
+  getAnimationBoardStyle,
+  getFloatingBoardPreference,
+  getWorkspaceTaskSurface,
+  PERSONALIZATION_EVENT,
+  setFloatingBoardPreference,
+  setWorkspaceTaskSurface,
+  type AnimationBoardStyle,
+  type FloatingBoardPreference,
+  type WorkspaceTaskSurface,
+} from "@/lib/personalization";
 
 const GraphCanvas = lazy(() =>
   import("@/pages/Graph").then((module) => ({ default: module.GraphCanvas })),
@@ -143,6 +164,20 @@ function useDebouncedValue<T>(value: T, delay = 180): T {
   return debounced;
 }
 
+function usePrefersReducedMotion(): boolean {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setPrefersReducedMotion(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+  return prefersReducedMotion;
+}
+
 function carbonWorkflowStatus(home: string, tasks: Task[]): Status {
   const defaults = ["backlog", "ready", "in_progress", "review", "done"];
   const discovered = tasks.map((task) => task.status).filter(Boolean);
@@ -168,6 +203,7 @@ export function CarbonWorkspace({
   presentation,
   catalogUpdatePending = false,
   onApplyCatalogUpdate,
+  onSetIcon,
   onBack,
   onSelectProject,
   onOpenTaskRoute,
@@ -186,12 +222,19 @@ export function CarbonWorkspace({
   const { actor } = useIdentity(suggestedActor);
   const [taskScope, setTaskScope] = useState<TaskScope>("project");
   const [sidebarFilter, setSidebarFilter] = useState<Filter>("all");
+  const [taskSurface, setTaskSurfaceState] = useState<WorkspaceTaskSurface>(getWorkspaceTaskSurface);
+  const [floatingBoard, setFloatingBoard] = useState<FloatingBoardPreference>(getFloatingBoardPreference);
+  const [nativeFloatingBoardActive, setNativeFloatingBoardActive] = useState(
+    () => isTauri() && getFloatingBoardPreference().open,
+  );
+  const [floatingStyle, setFloatingStyle] = useState<AnimationBoardStyle>(getAnimationBoardStyle);
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getTheme);
   const [connectOpen, setConnectOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const prefersReducedMotion = usePrefersReducedMotion();
   const canUseClusterScope = Boolean(cluster && isMultiProjectCluster(cluster));
   const scope = useMemo<CarbonScope>(
     () => ({ home, clusterId: cluster?.id, projectId: project.id }),
@@ -217,7 +260,14 @@ export function CarbonWorkspace({
   // include-cluster escape hatch.
   const boardScope = taskScope === "cluster" && canUseClusterScope ? clusterScope : scope;
   const boardScopeKey = useMemo(() => carbonScopeKey(boardScope), [boardScope]);
-  const taskQuery = useCarbonTasks(boardScope);
+  const floatingBoardTarget = useMemo<FloatingBoardTarget>(() => ({
+    ...(cluster?.id ? { clusterId: cluster.id } : {}),
+    ...(taskScope === "cluster" && canUseClusterScope ? {} : { projectId: project.id }),
+    workspaceProjectId: project.id,
+  }), [canUseClusterScope, cluster, project.id, taskScope]);
+  // The opt-in market history contains only action, actor, and timestamp. Task/log
+  // text stays out of this list response while the animation view gains real causes.
+  const taskQuery = useCarbonTasks(boardScope, false, true, true);
   useCarbonTaskEvents(boardScope);
   const tasks = useMemo(() => taskQuery.data?.available ? taskQuery.data.data.tasks ?? [] : [], [taskQuery.data]);
   const status = useMemo(() => carbonWorkflowStatus(home, tasks), [home, tasks]);
@@ -237,6 +287,66 @@ export function CarbonWorkspace({
   useEffect(() => {
     if (!canUseClusterScope) setTaskScope("project");
   }, [canUseClusterScope]);
+
+  useEffect(() => {
+    const syncFloatingBoard = () => {
+      setFloatingBoard(getFloatingBoardPreference());
+      setFloatingStyle(getAnimationBoardStyle());
+    };
+    window.addEventListener(PERSONALIZATION_EVENT, syncFloatingBoard);
+    window.addEventListener("storage", syncFloatingBoard);
+    return () => {
+      window.removeEventListener(PERSONALIZATION_EVENT, syncFloatingBoard);
+      window.removeEventListener("storage", syncFloatingBoard);
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening = () => {};
+    void onFloatingBoardClosed(() => {
+      if (disposed) return;
+      setNativeFloatingBoardActive(false);
+      const current = getFloatingBoardPreference();
+      if (!current.open) return;
+      const next = { ...current, open: false };
+      setFloatingBoard(next);
+      setFloatingBoardPreference(next);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stopListening = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stopListening();
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    if (!floatingBoard.open) {
+      setNativeFloatingBoardActive(false);
+      void closeFloatingBoard();
+      return () => { disposed = true; };
+    }
+
+    // Suppress the in-page fallback while the native window is opening. If the
+    // desktop channel is unavailable, it is restored immediately after the call.
+    if (isTauri()) setNativeFloatingBoardActive(true);
+    void openFloatingBoard(floatingBoardTarget).then((result) => {
+      if (!disposed) setNativeFloatingBoardActive(result === "opened");
+    });
+    return () => { disposed = true; };
+  }, [floatingBoard.open, floatingBoardTarget]);
+
+  const changeFloatingBoard = useCallback((next: FloatingBoardPreference) => {
+    setFloatingBoard(next);
+    setFloatingBoardPreference(next);
+  }, []);
+  const changeTaskSurface = useCallback((next: WorkspaceTaskSurface) => {
+    setTaskSurfaceState(next);
+    setWorkspaceTaskSurface(next);
+  }, []);
 
   // A project/scope change must never leave an old dialog or selection surface
   // poised to submit into the new request boundary. The workspace shell itself
@@ -260,14 +370,19 @@ export function CarbonWorkspace({
   const nav: { id: CarbonView; label: string; icon: typeof KanbanSquare }[] = [
     { id: "board", label: t("Board", "看板"), icon: KanbanSquare },
     { id: "graph", label: t("Graph", "依赖图"), icon: Network },
-    { id: "workers", label: t("Worker", "Worker"), icon: UsersRound },
+    { id: "workers", label: t("Agents", "智能体团队"), icon: UsersRound },
     { id: "work-logs", label: t("Work logs", "工作日志"), icon: ListChecks },
-    { id: "owner-logs", label: t("Owner logs", "负责人日志"), icon: UsersRound },
     { id: "trash", label: t("Trash", "回收站"), icon: Trash2 },
   ];
 
   const selectTaskFilter = (filter: Filter) => {
     setSidebarFilter(filter);
+    changeTaskSurface(filter === "active" || filter === "stalled" || filter === "review" ? "agent-work" : "tasks");
+    onNavigateView("board");
+  };
+
+  const openVisualBoard = () => {
+    changeTaskSurface("board");
     onNavigateView("board");
   };
 
@@ -437,6 +552,7 @@ export function CarbonWorkspace({
               presentation={presentation}
               catalogUpdatePending={catalogUpdatePending}
               onApplyCatalogUpdate={onApplyCatalogUpdate}
+              onSetIcon={onSetIcon}
               onSelectProject={onSelectProject}
               onManage={onBack}
             />
@@ -476,6 +592,16 @@ export function CarbonWorkspace({
               <Plug data-icon="inline-start" />
               {t("Connect", "连接")}
             </Button>
+            <Button
+              variant={floatingBoard.open ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label={floatingBoard.open ? t("Close floating window", "关闭悬浮窗") : t("Open floating window", "打开悬浮窗")}
+              aria-pressed={floatingBoard.open}
+              title={floatingBoard.open ? t("Close floating window", "关闭悬浮窗") : t("Open floating window", "打开悬浮窗")}
+              onClick={() => changeFloatingBoard({ ...floatingBoard, open: !floatingBoard.open })}
+            >
+              <PictureInPicture2 />
+            </Button>
             <CarbonNotificationBell
               scope={scope}
               actor={actor}
@@ -506,7 +632,7 @@ export function CarbonWorkspace({
                 {t("Tasks", "任务")}
               </p>
               {taskNav.map(({ id, label, icon: Icon }) => {
-                const active = activeView === "board" && sidebarFilter === id;
+                const active = activeView === "board" && taskSurface === "tasks" && sidebarFilter === id;
                 return (
                   <button
                     key={id}
@@ -531,7 +657,7 @@ export function CarbonWorkspace({
                 {t("Agent work", "智能体工作")}
               </p>
               {agentWorkNav.map(({ id, label, icon: Icon }) => {
-                const active = activeView === "board" && sidebarFilter === id;
+                const active = activeView === "board" && taskSurface === "agent-work" && sidebarFilter === id;
                 return (
                   <button
                     key={id}
@@ -559,11 +685,11 @@ export function CarbonWorkspace({
                 <button
                   key={id}
                   type="button"
-                  onClick={() => onNavigateView(id)}
-                  aria-current={activeView === id ? "page" : undefined}
+                  onClick={() => id === "board" ? openVisualBoard() : onNavigateView(id)}
+                  aria-current={activeView === id && (id !== "board" || taskSurface === "board") ? "page" : undefined}
                   className={cn(
                     "flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted sm:w-full",
-                    activeView === id && "bg-muted font-medium text-brand",
+                    activeView === id && (id !== "board" || taskSurface === "board") && "bg-muted font-medium text-brand",
                   )}
                 >
                   <Icon className="size-4" />
@@ -632,8 +758,11 @@ export function CarbonWorkspace({
               bulkScope={boardScope}
               boardScopeKey={boardScopeKey}
               storageKey={storageKey}
-              tasks={boardTasks}
+              tasks={taskSurface === "board" ? tasks : boardTasks}
               status={status}
+              surface={taskSurface}
+              floatingBoardOpen={floatingBoard.open}
+              onFloatingBoardToggle={() => changeFloatingBoard({ ...floatingBoard, open: !floatingBoard.open })}
               projects={workspaceProjects}
               loading={taskQuery.isLoading}
               unavailable={!taskQuery.isLoading && taskQuery.data?.available === false}
@@ -701,6 +830,18 @@ export function CarbonWorkspace({
         onOpenTask={openTask}
       />
       <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      {!nativeFloatingBoardActive && (
+        <CarbonFloatingBoard
+          projectKey={boardScopeKey}
+          preference={floatingBoard}
+          style={floatingStyle}
+          tasks={tasks}
+          status={status}
+          prefersReducedMotion={prefersReducedMotion}
+          onPreferenceChange={changeFloatingBoard}
+          onOpenTask={openTask}
+        />
+      )}
       </div>
     </WorkerAliasProvider>
   );
@@ -713,6 +854,9 @@ function CarbonBoard({
   storageKey,
   tasks,
   status,
+  surface,
+  floatingBoardOpen,
+  onFloatingBoardToggle,
   projects,
   loading,
   unavailable,
@@ -728,6 +872,9 @@ function CarbonBoard({
   storageKey: string;
   tasks: Task[];
   status: Status;
+  surface: WorkspaceTaskSurface;
+  floatingBoardOpen: boolean;
+  onFloatingBoardToggle: () => void;
   projects: CarbonHomeProject[];
   loading: boolean;
   unavailable: boolean;
@@ -763,6 +910,9 @@ function CarbonBoard({
   const bulkMove = useBulkCarbonMove(storageKey, bulkScope);
   const trashTasks = useTrashCarbonTasks(storageKey, bulkScope);
   const transitionTask = useTransitionCarbonTask(storageKey, bulkScope);
+  // Rank writes are fully Carbon-scoped; the legacy path argument must stay empty
+  // so a reordered task cannot accidentally use a filesystem-path transport.
+  const reorderTask = useReorderCarbonTask("", bulkScope);
   const bulkAvailable = capabilities.data?.available === true && hasCarbonFeature(capabilities.data.data, "bulk");
   const deferredQuery = useDeferredValue(query);
   const debouncedQuery = useDebouncedValue(deferredQuery, 150);
@@ -864,8 +1014,11 @@ function CarbonBoard({
     [assignee, label, priority, query],
   );
   const handleTransition = useCallback((task: Task, to: string) => {
-    transitionTask.mutate({ id: task.id, to });
+    return transitionTask.mutateAsync({ id: task.id, to });
   }, [transitionTask]);
+  const handleReorder = useCallback((task: Task, rank: number) => {
+    return reorderTask.mutateAsync({ id: task.id, rank });
+  }, [reorderTask]);
   const requestTrash = useCallback((task: Task) => {
     if (!task.version) return;
     trashTasks.mutate({
@@ -1032,16 +1185,16 @@ function CarbonBoard({
             {t("Trash", "移入回收站")}
           </Button>
           <Button variant="ghost" size="sm" className="ml-auto" onClick={clearSelection}>{t("Clear", "清除")}</Button>
-          {!bulkAvailable && <span className="basis-full text-xs text-muted-foreground">{t("Bulk editing requires the Carbon stable v2 bulk capability.", "批量编辑需要 Carbon stable v2 的 bulk 能力。")}</span>}
-          {!hasExpectedVersions && <span className="basis-full text-xs text-warning">{t("Refresh the selected tasks before a version-protected bulk operation.", "请先刷新选中任务，再执行受版本保护的批量操作。")}</span>}
+          {!bulkAvailable && <span className="basis-full text-xs text-muted-foreground">{t("Update Carbon to edit several tasks at once.", "更新 Carbon 后即可同时编辑多个任务。")}</span>}
+          {!hasExpectedVersions && <span className="basis-full text-xs text-warning">{t("Refresh the selected tasks before changing them together.", "请先刷新选中的任务，再统一修改。")}</span>}
         </div>
       )}
 
       {unavailable && (
         <div className="p-4">
           <Alert>
-            <AlertTitle>{t("Scoped task API unavailable", "范围任务 API 不可用")}</AlertTitle>
-            <AlertDescription>{t("Carbon never falls back to a filesystem path request.", "Carbon 不会回退为基于文件路径的请求。")}</AlertDescription>
+            <AlertTitle>{t("Tasks could not be loaded", "暂时无法读取任务")}</AlertTitle>
+            <AlertDescription>{t("The current project did not return task data. Refresh or update Carbon and try again.", "当前项目没有返回任务数据，请刷新或更新 Carbon 后重试。")}</AlertDescription>
           </Alert>
         </div>
       )}
@@ -1049,10 +1202,15 @@ function CarbonBoard({
       {!loading && !unavailable && (
         <CarbonTaskList
           storageKey={storageKey}
+          marketKey={boardScopeKey}
           tasks={tasks}
           status={status}
-          onTransition={handleTransition}
-          onTrashTask={requestTrash}
+          surface={surface}
+          floatingBoardOpen={floatingBoardOpen}
+          onFloatingBoardToggle={onFloatingBoardToggle}
+           onTransition={handleTransition}
+           onReorder={handleReorder}
+           onTrashTask={requestTrash}
           transitioningId={transitionTask.isPending ? transitionTask.variables?.id : undefined}
           onOpenTask={onOpenTask}
           onOpenWorker={onOpenWorker}
@@ -1087,7 +1245,7 @@ function CarbonBoard({
                   {(serverViewsAvailable ? remoteViews.length === 0 : localViewsFallback && localViews.length === 0) && <DropdownMenuItem disabled>{t("No saved views", "暂无保存视图")}</DropdownMenuItem>}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem disabled={!serverViewsAvailable && !localViewsFallback} onSelect={saveCurrentView}>{t("Save current view", "保存当前视图")}</DropdownMenuItem>
-                  {localViewsFallback && <p className="px-2 pb-1 text-[11px] text-muted-foreground">{t("Server views returned 404; this fallback is stored only on this device.", "服务端 views 返回 404；兼容视图仅保存在本机。")}</p>}
+                  {localViewsFallback && <p className="px-2 pb-1 text-[11px] text-muted-foreground">{t("These saved views are available only on this device.", "这些保存视图仅在本机可用。")}</p>}
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button
@@ -1179,11 +1337,11 @@ function CarbonSearchDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
-        <DialogHeader><DialogTitle>{scope.clusterId ? t("Global Carbon search", "Carbon 全局搜索") : t("Project search", "项目搜索")}</DialogTitle><DialogDescription>{scope.clusterId ? t("Results come from the scoped /api/search endpoint. The default searches all clusters in this Home.", "结果来自 scoped /api/search 接口；默认搜索此 Home 的全部集群。") : t("Search tasks only in this independent project's boundary.", "仅在当前独立项目的边界内搜索任务。")}</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>{scope.clusterId ? t("Search all work", "搜索全部工作") : t("Project search", "项目搜索")}</DialogTitle><DialogDescription>{scope.clusterId ? t("Search every cluster, or narrow the results to the current cluster or project.", "可搜索全部集群，也可缩小到当前集群或项目。") : t("Search tasks in this project.", "搜索当前项目中的任务。")}</DialogDescription></DialogHeader>
         {scope.clusterId && <Select value={searchScope} onValueChange={(value) => setSearchScope(value as "all" | "cluster" | "project")}><SelectTrigger className="w-44">{searchScope === "all" ? t("All clusters", "全部集群") : searchScope === "cluster" ? t("This cluster", "当前集群") : t("This project", "当前项目")}</SelectTrigger><SelectContent><SelectItem value="all">{t("All clusters", "全部集群")}</SelectItem><SelectItem value="cluster">{t("This cluster", "当前集群")}</SelectItem><SelectItem value="project">{t("This project", "当前项目")}</SelectItem></SelectContent></Select>}
         <Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search tasks", "搜索任务")} />
         {query.trim() && (search.isLoading || query !== debouncedQuery) && <p className="text-sm text-muted-foreground">{t("Searching…", "正在搜索…")}</p>}
-        {query.trim() && search.data?.available === false && <Alert><AlertTitle>{t("Search API unavailable", "搜索 API 不可用")}</AlertTitle><AlertDescription>{t("No current-list fallback is used for global Carbon search.", "Carbon 全局搜索不会回退为当前列表筛选。")}</AlertDescription></Alert>}
+        {query.trim() && search.data?.available === false && <Alert><AlertTitle>{t("Search is temporarily unavailable", "搜索暂时不可用")}</AlertTitle><AlertDescription>{t("Refresh or update Carbon, then try the search again.", "请刷新或更新 Carbon 后重新搜索。")}</AlertDescription></Alert>}
         <div className="max-h-80 overflow-y-auto rounded-md border">
           {results.map((result) => <button key={`${result.clusterId ?? "current"}:${result.task.projectId ?? "current"}:${result.task.id}`} onClick={() => openResult(result)} className="flex w-full flex-col gap-1 border-b px-3 py-2 text-left last:border-0 hover:bg-muted"><span className="font-medium">{result.task.title}</span><span className="font-mono text-xs text-muted-foreground">{result.task.id} {result.task.projectId ? `· ${result.task.projectId}` : ""}{result.clusterId ? ` · ${result.clusterId}` : ""}</span>{result.highlights?.[0]?.excerpt && <span className="line-clamp-2 text-xs text-muted-foreground">{result.highlights[0].excerpt}</span>}</button>)}
           {query.trim() && !search.isLoading && search.data?.available && !results.length && <p className="p-3 text-sm text-muted-foreground">{t("No matches.", "没有匹配项。")}</p>}

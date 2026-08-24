@@ -1,0 +1,467 @@
+.carbon-work-floor {
+  --work-ink: var(--foreground);
+  --work-muted: var(--muted-foreground);
+  --work-line: color-mix(in oklab, var(--border) 82%, var(--brand));
+  --work-panel: color-mix(in oklab, var(--card) 94%, var(--brand));
+  --work-panel-strong: color-mix(in oklab, var(--card) 88%, var(--brand));
+  --work-grid: color-mix(in oklab, var(--brand) 13%, transparent);
+  --work-cyan: #0f9fa4;
+  --work-violet: #7067e8;
+  --work-amber: #b5790b;
+  --work-red: #d6464f;
+  --work-green: #168a64;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--work-line);
+  border-radius: 1rem;
+  color: var(--work-ink);
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--brand) 8%, transparent), transparent 42%),
+    var(--work-panel);
+  box-shadow: 0 0.85rem 2rem color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.carbon-work-floor[data-compact="true"] {
+  border-radius: 0.7rem;
+  box-shadow: 0 0.45rem 1rem color-mix(in oklab, var(--foreground) 9%, transparent);
+}
+
+.carbon-work-floor[data-reduced-motion="true"] *,
+.carbon-work-floor[data-reduced-motion="true"] *::before,
+.carbon-work-floor[data-reduced-motion="true"] *::after {
+  animation: none !important;
+  transition-duration: 0.01ms !important;
+}
+
+.carbon-work-floor-header,
+.carbon-work-floor-toolbar,
+.carbon-work-floor-footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.carbon-work-floor-header {
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--work-line);
+  padding: 0.7rem 0.8rem;
+  background: color-mix(in oklab, var(--card) 92%, var(--brand));
+}
+
+.carbon-work-floor-brand,
+.carbon-work-floor-head-actions,
+.carbon-work-floor-actions,
+.carbon-work-floor-metrics,
+.carbon-work-floor-view-toggle,
+.carbon-work-floor-zoom,
+.carbon-work-floor-section-icon,
+.carbon-work-floor-subhead,
+.carbon-work-floor-preview-main,
+.carbon-work-floor-preview-action,
+.carbon-work-floor-task-chip,
+.carbon-work-floor-queue-row,
+.carbon-work-floor-worker-row,
+.carbon-work-floor-rail-worker,
+.carbon-work-floor-zone-head,
+.carbon-work-floor-zone-open,
+.carbon-work-floor-overflow,
+.carbon-work-floor-quiet,
+.carbon-work-floor-more {
+  display: flex;
+  align-items: center;
+}
+
+.carbon-work-floor-brand {
+  min-width: 0;
+  gap: 0.6rem;
+}
+
+.carbon-work-floor-mark,
+.carbon-work-floor-section-icon,
+.carbon-work-floor-zone-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--work-violet);
+  background: color-mix(in oklab, var(--work-violet) 13%, var(--card));
+}
+
+.carbon-work-floor-mark {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid color-mix(in oklab, var(--work-violet) 45%, var(--border));
+  border-radius: 0.55rem;
+  box-shadow: 0.18rem 0.18rem 0 color-mix(in oklab, var(--work-violet) 22%, transparent);
+}
+
+.carbon-work-floor-mark svg { width: 1.15rem; height: 1.15rem; }
+
+.carbon-work-floor-eyebrow,
+.carbon-work-floor-brand p,
+.carbon-work-floor-stage-header p,
+.carbon-work-floor-subhead p,
+.carbon-work-floor-queue-head p,
+.carbon-work-floor-preview p {
+  margin: 0;
+  color: var(--work-muted);
+  font-size: 0.64rem;
+  line-height: 1.25;
+}
+
+.carbon-work-floor-eyebrow {
+  color: var(--work-violet) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.carbon-work-floor-brand h2,
+.carbon-work-floor-stage-header h3,
+.carbon-work-floor-subhead h3,
+.carbon-work-floor-queue-head h3,
+.carbon-work-floor-preview h3 {
+  margin: 0;
+  color: var(--work-ink);
+  font-weight: 750;
+}
+
+.carbon-work-floor-brand h2 { font-size: 0.95rem; line-height: 1.15; }
+.carbon-work-floor-brand p:last-child { margin-top: 0.13rem; font-size: 0.71rem; }
+
+.carbon-work-floor-head-actions,
+.carbon-work-floor-actions { flex-wrap: wrap; justify-content: flex-end; }
+.carbon-work-floor-metrics { gap: 0.25rem; }
+.carbon-work-floor-metrics span,
+.carbon-work-floor-zoom output,
+.carbon-work-floor-stage-header > span,
+.carbon-work-floor-queue-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  border: 1px solid var(--work-line);
+  border-radius: 999px;
+  padding: 0.25rem 0.42rem;
+  color: var(--work-muted);
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.carbon-work-floor-metrics svg { width: 0.78rem; height: 0.78rem; }
+.carbon-work-floor-metrics span[data-tone="active"] { color: var(--work-violet); }
+.carbon-work-floor-metrics span[data-tone="blocked"] { color: var(--work-red); }
+.carbon-work-floor-metrics span[data-tone="completed"] { color: var(--work-green); }
+
+.carbon-work-floor-view-toggle {
+  overflow: hidden;
+  border: 1px solid var(--work-line);
+  border-radius: 0.45rem;
+  background: color-mix(in oklab, var(--card) 95%, transparent);
+}
+.carbon-work-floor-view-toggle button,
+.carbon-work-floor-zoom button,
+.carbon-work-floor-zone-tabs button,
+.carbon-work-floor-zone-open,
+.carbon-work-floor-overflow,
+.carbon-work-floor-more,
+.carbon-work-floor-open,
+.carbon-work-floor-dismiss {
+  border: 0;
+  color: var(--work-muted);
+  cursor: pointer;
+  font: inherit;
+  background: transparent;
+}
+.carbon-work-floor-view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.32rem 0.48rem;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+.carbon-work-floor-view-toggle button + button { border-left: 1px solid var(--work-line); }
+.carbon-work-floor-view-toggle button.is-active { color: var(--work-ink); background: color-mix(in oklab, var(--work-violet) 14%, var(--card)); }
+.carbon-work-floor-view-toggle svg { width: 0.78rem; height: 0.78rem; }
+
+.carbon-work-floor-toolbar {
+  align-items: stretch;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--work-line);
+  padding: 0.42rem 0.6rem;
+  background: color-mix(in oklab, var(--card) 96%, var(--foreground));
+}
+.carbon-work-floor-zone-tabs {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 26rem;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.carbon-work-floor-zone-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.24rem;
+  border-radius: 0.38rem;
+  padding: 0.34rem 0.42rem;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+.carbon-work-floor-zone-tabs button:hover,
+.carbon-work-floor-zone-tabs button:focus-visible { color: var(--work-ink); background: color-mix(in oklab, var(--brand) 10%, var(--card)); }
+.carbon-work-floor-zone-tabs button.is-active { color: var(--work-ink); background: color-mix(in oklab, var(--work-violet) 14%, var(--card)); box-shadow: inset 0 -2px 0 var(--work-violet); }
+.carbon-work-floor-zone-tabs svg { width: 0.75rem; height: 0.75rem; }
+.carbon-work-floor-zone-tabs b { color: inherit; font-size: 0.64rem; font-weight: 800; opacity: 0.75; }
+.carbon-work-floor-zone-tab[data-zone="blocked"] { color: color-mix(in oklab, var(--work-red) 80%, var(--work-ink)); }
+.carbon-work-floor-zone-tab[data-zone="completed"] { color: color-mix(in oklab, var(--work-green) 80%, var(--work-ink)); }
+
+.carbon-work-floor-zoom {
+  flex: 0 0 auto;
+  gap: 0.15rem;
+  color: var(--work-muted);
+}
+.carbon-work-floor-zoom > svg { width: 0.78rem; height: 0.78rem; }
+.carbon-work-floor-zoom button { display: inline-grid; width: 1.55rem; height: 1.55rem; place-items: center; border-radius: 0.3rem; }
+.carbon-work-floor-zoom button:hover,
+.carbon-work-floor-zoom button:focus-visible { color: var(--work-ink); background: color-mix(in oklab, var(--brand) 12%, var(--card)); }
+.carbon-work-floor-zoom button svg { width: 0.75rem; height: 0.75rem; }
+.carbon-work-floor-zoom output { min-width: 2.45rem; justify-content: center; border: 0; padding: 0.2rem; background: transparent; }
+
+.carbon-work-floor-preview {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  border-bottom: 1px solid var(--work-line);
+  padding: 0.46rem 0.7rem;
+  background: color-mix(in oklab, var(--card) 92%, var(--work-violet));
+  box-shadow: 0 0.35rem 0.9rem color-mix(in oklab, var(--foreground) 8%, transparent);
+  animation: carbon-work-preview-in 180ms ease-out both;
+}
+.carbon-work-floor-preview-main { min-width: 0; gap: 0.5rem; }
+.carbon-work-floor-preview h3 { overflow: hidden; max-width: min(42rem, 48vw); margin-top: 0.08rem; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
+.carbon-work-floor-preview span { display: block; overflow: hidden; color: var(--work-muted); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
+.carbon-work-floor-preview-action { flex: 0 0 auto; gap: 0.28rem; }
+.carbon-work-floor-preview-action > span { display: none; }
+.carbon-work-floor-dismiss { display: inline-grid; width: 1.55rem; height: 1.55rem; place-items: center; border-radius: 0.3rem; }
+.carbon-work-floor-dismiss:hover { color: var(--work-ink); background: color-mix(in oklab, var(--foreground) 9%, transparent); }
+.carbon-work-floor-dismiss svg { width: 0.85rem; height: 0.85rem; }
+.carbon-work-floor-open { display: inline-flex; align-items: center; gap: 0.25rem; border: 1px solid color-mix(in oklab, var(--work-violet) 50%, var(--border)); border-radius: 0.35rem; padding: 0.32rem 0.48rem; color: var(--work-ink); background: color-mix(in oklab, var(--work-violet) 18%, var(--card)); font-size: 0.67rem; font-weight: 750; white-space: nowrap; }
+.carbon-work-floor-open:hover { background: color-mix(in oklab, var(--work-violet) 28%, var(--card)); }
+.carbon-work-floor-open svg { width: 0.75rem; height: 0.75rem; }
+
+.carbon-work-floor-viewport {
+  min-height: 15rem;
+  flex: 1 1 auto;
+  overflow: auto;
+  cursor: grab;
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in oklab, var(--brand) 45%, var(--border)) transparent;
+  touch-action: pan-x pan-y;
+}
+.carbon-work-floor-viewport:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.carbon-work-floor-viewport[data-dragging="true"] { cursor: grabbing; user-select: none; }
+.carbon-work-floor-frame { min-width: 100%; min-height: 100%; transition: width 180ms ease; }
+.carbon-work-floor-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 100%;
+  padding: 0.7rem;
+  background-color: color-mix(in oklab, var(--muted) 34%, var(--card));
+  background-image:
+    linear-gradient(var(--work-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--work-grid) 1px, transparent 1px),
+    radial-gradient(color-mix(in oklab, var(--brand) 18%, transparent) 0.55px, transparent 0.65px);
+  background-position: 0 0, 0 0, 0.5px 0.5px;
+  background-size: 1.25rem 1.25rem, 1.25rem 1.25rem, 3px 3px;
+}
+
+.carbon-work-floor-overview,
+.carbon-work-floor-queue-layout { display: grid; min-width: 0; gap: 0.65rem; }
+.carbon-work-floor-overview { grid-template-columns: minmax(0, 1.55fr) minmax(13rem, 0.75fr); }
+.carbon-work-floor-stage,
+.carbon-work-floor-roster,
+.carbon-work-floor-queue-panel,
+.carbon-work-floor-queue-rail {
+  min-width: 0;
+  border: 1px solid var(--work-line);
+  border-radius: 0.7rem;
+  background: color-mix(in oklab, var(--card) 94%, transparent);
+  box-shadow: 0.18rem 0.18rem 0 color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+.carbon-work-floor-stage { padding: 0.65rem; }
+.carbon-work-floor-stage-header,
+.carbon-work-floor-queue-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.55rem; margin-bottom: 0.55rem; }
+.carbon-work-floor-stage-header h3,
+.carbon-work-floor-queue-head h3 { margin-top: 0.08rem; font-size: 0.88rem; }
+.carbon-work-floor-stage-header > span,
+.carbon-work-floor-queue-head > span { flex: 0 0 auto; }
+.carbon-work-floor-zone-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.carbon-work-floor-zone { min-width: 0; overflow: hidden; border: 1px solid color-mix(in oklab, var(--work-zone-color, var(--work-violet)) 35%, var(--border)); border-radius: 0.55rem; padding: 0.52rem; background: color-mix(in oklab, var(--work-zone-color, var(--work-violet)) 6%, var(--card)); }
+.carbon-work-floor-zone:last-child { grid-column: 1 / -1; }
+.carbon-work-floor-zone[data-zone="queued"] { --work-zone-color: var(--work-amber); }
+.carbon-work-floor-zone[data-zone="active"] { --work-zone-color: var(--work-violet); }
+.carbon-work-floor-zone[data-zone="review"] { --work-zone-color: var(--work-cyan); }
+.carbon-work-floor-zone[data-zone="blocked"] { --work-zone-color: var(--work-red); }
+.carbon-work-floor-zone[data-zone="completed"] { --work-zone-color: var(--work-green); }
+.carbon-work-floor-zone-head { min-width: 0; align-items: flex-start; gap: 0.42rem; }
+.carbon-work-floor-zone-head > div { min-width: 0; flex: 1; }
+.carbon-work-floor-zone-head h4 { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; font-size: 0.74rem; }
+.carbon-work-floor-zone-head p { overflow: hidden; margin: 0.08rem 0 0; color: var(--work-muted); font-size: 0.6rem; text-overflow: ellipsis; white-space: nowrap; }
+.carbon-work-floor-zone-head > b { color: var(--work-zone-color); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.carbon-work-floor-zone-icon { width: 1.5rem; height: 1.5rem; border: 1px solid color-mix(in oklab, var(--work-zone-color, var(--work-violet)) 38%, var(--border)); border-radius: 0.3rem; color: var(--work-zone-color, var(--work-violet)); background: color-mix(in oklab, var(--work-zone-color, var(--work-violet)) 13%, var(--card)); }
+.carbon-work-floor-zone-icon svg { width: 0.8rem; height: 0.8rem; }
+.carbon-work-floor-energy { height: 0.25rem; margin: 0.45rem 0; overflow: hidden; border-radius: 99px; background: color-mix(in oklab, var(--work-zone-color, var(--work-violet)) 10%, var(--muted)); }
+.carbon-work-floor-energy span { display: block; width: var(--work-energy, 0%); height: 100%; border-radius: inherit; background: var(--work-zone-color, var(--work-violet)); transition: width 300ms ease; }
+.carbon-work-floor-zone-tasks { display: flex; min-height: 2.55rem; flex-direction: column; gap: 0.25rem; }
+.carbon-work-floor-task-chip { min-width: 0; gap: 0.35rem; border: 1px solid transparent; border-radius: 0.35rem; padding: 0.27rem 0.3rem; color: var(--work-ink); text-align: left; background: color-mix(in oklab, var(--card) 72%, var(--work-zone-color, var(--work-violet))); cursor: pointer; }
+.carbon-work-floor-task-chip:hover,
+.carbon-work-floor-task-chip:focus-visible,
+.carbon-work-floor-task-chip[data-selected="true"] { border-color: var(--work-zone-color, var(--work-violet)); background: color-mix(in oklab, var(--card) 60%, var(--work-zone-color, var(--work-violet))); outline: none; }
+.carbon-work-floor-task-chip > span:not(.carbon-work-floor-avatar) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.66rem; }
+.carbon-work-floor-task-chip > i { width: 0.34rem; height: 0.34rem; flex: 0 0 auto; border-radius: 1px; background: var(--work-zone-color, var(--work-violet)); box-shadow: 1px 1px 0 color-mix(in oklab, var(--foreground) 20%, transparent); }
+.carbon-work-floor-overflow,
+.carbon-work-floor-zone-open { justify-content: center; gap: 0.22rem; border-radius: 0.3rem; padding: 0.25rem; font-size: 0.63rem; }
+.carbon-work-floor-overflow { color: var(--work-zone-color, var(--work-violet)); }
+.carbon-work-floor-overflow:hover,
+.carbon-work-floor-zone-open:hover { background: color-mix(in oklab, var(--work-zone-color, var(--work-violet)) 10%, transparent); }
+.carbon-work-floor-overflow svg,
+.carbon-work-floor-zone-open svg { width: 0.7rem; height: 0.7rem; }
+.carbon-work-floor-zone-open { width: 100%; margin-top: 0.28rem; border-top: 1px dashed color-mix(in oklab, var(--work-zone-color, var(--work-violet)) 28%, var(--border)); color: var(--work-muted); }
+.carbon-work-floor-quiet { justify-content: center; gap: 0.25rem; min-height: 2.5rem; color: var(--work-muted); font-size: 0.65rem; }
+.carbon-work-floor-quiet svg { width: 0.72rem; height: 0.72rem; }
+
+.carbon-work-floor-roster,
+.carbon-work-floor-queue-rail { padding: 0.65rem; }
+.carbon-work-floor-subhead { min-width: 0; gap: 0.42rem; margin-bottom: 0.55rem; }
+.carbon-work-floor-subhead > div:not(.carbon-work-floor-section-icon) { min-width: 0; flex: 1; }
+.carbon-work-floor-subhead h3 { overflow: hidden; margin-top: 0.08rem; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; }
+.carbon-work-floor-subhead > b { color: var(--work-violet); font-size: 0.85rem; }
+.carbon-work-floor-section-icon { width: 1.55rem; height: 1.55rem; border-radius: 0.3rem; }
+.carbon-work-floor-section-icon svg { width: 0.82rem; height: 0.82rem; }
+.carbon-work-floor-worker-list,
+.carbon-work-floor-rail-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.carbon-work-floor-worker-row { width: 100%; min-width: 0; gap: 0.35rem; border: 1px solid transparent; border-radius: 0.4rem; padding: 0.34rem; color: var(--work-ink); text-align: left; background: color-mix(in oklab, var(--card) 74%, var(--brand)); cursor: pointer; }
+.carbon-work-floor-worker-row:hover,
+.carbon-work-floor-worker-row:focus-visible { border-color: var(--work-line); background: color-mix(in oklab, var(--brand) 12%, var(--card)); outline: none; }
+.carbon-work-floor-worker-initial,
+.carbon-work-floor-rail-worker > span { display: inline-grid; flex: 0 0 auto; place-items: center; width: 1.6rem; height: 1.6rem; border: 1px solid color-mix(in oklab, var(--work-violet) 35%, var(--border)); border-radius: 0.3rem; color: var(--work-violet); background: color-mix(in oklab, var(--work-violet) 10%, var(--card)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.6rem; font-weight: 800; }
+.carbon-work-floor-worker-copy { min-width: 0; flex: 1; }
+.carbon-work-floor-worker-copy strong,
+.carbon-work-floor-worker-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.carbon-work-floor-worker-copy strong { font-size: 0.68rem; }
+.carbon-work-floor-worker-copy small { margin-top: 0.08rem; color: var(--work-muted); font-size: 0.59rem; }
+.carbon-work-floor-worker-signal { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 0.2rem; color: var(--work-muted); font-size: 0.59rem; white-space: nowrap; }
+.carbon-work-floor-worker-signal i { width: 0.34rem; height: 0.34rem; border-radius: 1px; background: var(--work-muted); }
+.carbon-work-floor-worker-signal[data-tone="active"] i { background: var(--work-violet); animation: carbon-work-pulse var(--work-floor-cycle) steps(2, end) infinite; }
+.carbon-work-floor-worker-signal[data-tone="blocked"] i { background: var(--work-red); }
+.carbon-work-floor-worker-row > svg,
+.carbon-work-floor-rail-worker > svg { width: 0.75rem; height: 0.75rem; flex: 0 0 auto; color: var(--work-muted); }
+.carbon-work-floor-more { width: 100%; justify-content: center; gap: 0.22rem; border: 1px dashed var(--work-line); border-radius: 0.35rem; padding: 0.32rem; color: var(--work-muted); font-size: 0.63rem; cursor: pointer; }
+.carbon-work-floor-more:hover { color: var(--work-ink); background: color-mix(in oklab, var(--brand) 10%, var(--card)); }
+.carbon-work-floor-more svg { width: 0.7rem; height: 0.7rem; }
+
+.carbon-work-floor-queue-layout { grid-template-columns: minmax(0, 1.55fr) minmax(12rem, 0.7fr); }
+.carbon-work-floor-queue-panel { padding: 0.65rem; }
+.carbon-work-floor-queue-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.carbon-work-floor-queue-row { width: 100%; min-width: 0; gap: 0.48rem; border: 1px solid transparent; border-radius: 0.45rem; padding: 0.4rem; color: var(--work-ink); text-align: left; background: color-mix(in oklab, var(--card) 78%, var(--work-zone-color, var(--work-violet))); cursor: pointer; }
+.carbon-work-floor-queue-row:hover,
+.carbon-work-floor-queue-row:focus-visible,
+.carbon-work-floor-queue-row[data-selected="true"] { border-color: var(--work-zone-color, var(--work-violet)); outline: none; background: color-mix(in oklab, var(--card) 68%, var(--work-zone-color, var(--work-violet))); }
+.carbon-work-floor-queue-row[data-zone="queued"] { --work-zone-color: var(--work-amber); }
+.carbon-work-floor-queue-row[data-zone="active"] { --work-zone-color: var(--work-violet); }
+.carbon-work-floor-queue-row[data-zone="review"] { --work-zone-color: var(--work-cyan); }
+.carbon-work-floor-queue-row[data-zone="blocked"] { --work-zone-color: var(--work-red); }
+.carbon-work-floor-queue-row[data-zone="completed"] { --work-zone-color: var(--work-green); }
+.carbon-work-floor-queue-copy { min-width: 0; flex: 1; }
+.carbon-work-floor-queue-copy strong,
+.carbon-work-floor-queue-copy small,
+.carbon-work-floor-queue-copy em { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.carbon-work-floor-queue-copy strong { font-size: 0.7rem; }
+.carbon-work-floor-queue-copy small { margin-top: 0.1rem; color: var(--work-muted); font-size: 0.59rem; }
+.carbon-work-floor-queue-copy em { margin-top: 0.12rem; color: var(--work-zone-color, var(--work-violet)); font-size: 0.59rem; font-style: normal; }
+.carbon-work-floor-queue-energy { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; color: var(--work-zone-color, var(--work-violet)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.7rem; font-weight: 800; }
+.carbon-work-floor-queue-energy small { color: var(--work-muted); font-family: inherit; font-size: 0.51rem; font-weight: 500; }
+.carbon-work-floor-queue-row > svg { width: 0.75rem; height: 0.75rem; flex: 0 0 auto; color: var(--work-muted); }
+.carbon-work-floor-queue-more,
+.carbon-work-floor-empty { margin: 0.5rem 0 0; color: var(--work-muted); font-size: 0.65rem; line-height: 1.4; }
+.carbon-work-floor-rail-worker { width: 100%; min-width: 0; gap: 0.36rem; border: 1px solid transparent; border-radius: 0.35rem; padding: 0.3rem; color: var(--work-ink); text-align: left; background: color-mix(in oklab, var(--card) 76%, var(--brand)); cursor: pointer; }
+.carbon-work-floor-rail-worker:hover,
+.carbon-work-floor-rail-worker:focus-visible { border-color: var(--work-line); outline: none; background: color-mix(in oklab, var(--brand) 12%, var(--card)); }
+.carbon-work-floor-rail-worker > span { width: 1.45rem; height: 1.45rem; font-size: 0.55rem; }
+.carbon-work-floor-rail-worker strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.65rem; }
+.carbon-work-floor-rail-worker small { color: var(--work-muted); font-size: 0.6rem; }
+
+.carbon-work-floor-avatar { position: relative; display: inline-block; width: 1.45rem; height: 1.7rem; flex: 0 0 auto; color: var(--work-violet); image-rendering: pixelated; filter: drop-shadow(2px 2px 0 color-mix(in oklab, var(--foreground) 18%, transparent)); transform: translateY(0); animation: carbon-work-avatar-bob var(--work-floor-cycle) steps(2, end) infinite; }
+.carbon-work-floor-avatar[data-compact="true"] { width: 1.1rem; height: 1.35rem; }
+.carbon-work-floor-avatar[data-zone="queued"] { color: var(--work-amber); }
+.carbon-work-floor-avatar[data-zone="active"],
+.carbon-work-floor-avatar[data-zone="review"] { color: var(--work-violet); }
+.carbon-work-floor-avatar[data-zone="blocked"] { color: var(--work-red); }
+.carbon-work-floor-avatar[data-zone="completed"] { color: var(--work-green); }
+.carbon-work-floor-avatar > i { position: absolute; display: block; background: currentColor; }
+.carbon-work-floor-avatar-head { top: 0; left: 0.42rem; width: 0.58rem; height: 0.48rem; box-shadow: 0.12rem 0.12rem 0 color-mix(in oklab, var(--foreground) 18%, transparent); }
+.carbon-work-floor-avatar-body { top: 0.56rem; left: 0.3rem; width: 0.82rem; height: 0.6rem; }
+.carbon-work-floor-avatar-arm { top: 0.62rem; width: 0.2rem; height: 0.55rem; transform-origin: top; }
+.carbon-work-floor-avatar-arm-a { left: 0.08rem; transform: rotate(18deg); }
+.carbon-work-floor-avatar-arm-b { right: 0.08rem; transform: rotate(-18deg); }
+.carbon-work-floor-avatar-leg { bottom: 0; width: 0.23rem; height: 0.57rem; }
+.carbon-work-floor-avatar-leg-a { left: 0.34rem; }
+.carbon-work-floor-avatar-leg-b { right: 0.34rem; }
+.carbon-work-floor-avatar[data-action="typing"] .carbon-work-floor-avatar-arm-b { animation: carbon-work-arm 1.15s steps(2, end) infinite; }
+.carbon-work-floor-avatar[data-action="blocked"] { animation-name: carbon-work-alert; }
+.carbon-work-floor-avatar[data-action="complete"] { animation-name: carbon-work-hop; }
+
+.carbon-work-floor-footer { flex-wrap: wrap; border-top: 1px solid var(--work-line); padding: 0.38rem 0.65rem; color: var(--work-muted); font-size: 0.61rem; }
+.carbon-work-floor-footer span { display: inline-flex; align-items: center; gap: 0.24rem; }
+.carbon-work-floor-footer svg { width: 0.72rem; height: 0.72rem; color: var(--work-violet); }
+
+@keyframes carbon-work-avatar-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes carbon-work-arm { 0%, 100% { transform: rotate(-22deg); } 50% { transform: rotate(26deg); } }
+@keyframes carbon-work-alert { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
+@keyframes carbon-work-hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes carbon-work-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@keyframes carbon-work-preview-in { from { opacity: 0; transform: translateY(-0.35rem); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 52rem) {
+  .carbon-work-floor-overview,
+  .carbon-work-floor-queue-layout { grid-template-columns: minmax(0, 1fr); }
+  .carbon-work-floor-roster,
+  .carbon-work-floor-queue-rail { order: 2; }
+}
+
+@media (max-width: 38rem) {
+  .carbon-work-floor-header { align-items: flex-start; }
+  .carbon-work-floor-head-actions { width: 100%; justify-content: space-between; }
+  .carbon-work-floor-actions { justify-content: flex-end; }
+  .carbon-work-floor-toolbar { align-items: flex-start; }
+  .carbon-work-floor-zone-tabs { flex-basis: 100%; }
+  .carbon-work-floor-zoom { width: 100%; justify-content: flex-end; }
+  .carbon-work-floor-zone-grid { grid-template-columns: minmax(0, 1fr); }
+  .carbon-work-floor-zone:last-child { grid-column: auto; }
+  .carbon-work-floor-preview { align-items: flex-start; flex-direction: column; gap: 0.35rem; }
+  .carbon-work-floor-preview h3 { max-width: 72vw; }
+  .carbon-work-floor-preview-action { width: 100%; justify-content: flex-end; }
+  .carbon-work-floor-preview-action > span { display: block; min-width: 0; flex: 1; overflow: hidden; color: var(--work-muted); text-overflow: ellipsis; white-space: nowrap; font-size: 0.62rem; }
+  .carbon-work-floor-footer { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
+}
+
+@media (max-width: 23rem) {
+  .carbon-work-floor-brand p:last-child,
+  .carbon-work-floor-worker-signal { display: none; }
+  .carbon-work-floor-view-toggle button { padding-inline: 0.36rem; }
+  .carbon-work-floor-header,
+  .carbon-work-floor-toolbar,
+  .carbon-work-floor-canvas { padding-inline: 0.45rem; }
+}

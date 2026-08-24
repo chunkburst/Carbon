@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderCog, PanelsTopLeft, Rows3 } from "lucide-react";
+import { Bot, CandlestickChart, FolderCog, PanelsTopLeft, Rows3 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -41,13 +41,18 @@ import type { CarbonScope } from "@/lib/carbon-api";
 import { useI18n } from "@/lib/i18n";
 import { displayName, useIdentity } from "@/lib/identity";
 import { applyTheme, getTheme, type Theme } from "@/lib/theme";
+import { ANIMATION_BOARD_STYLE_REGISTRY } from "@/lib/animation-board";
 import {
-  getBoardPresentation,
+  getAnimationBoardStyle,
+  getTaskListPresentation,
   getProjectManagementPresentation,
+  isAnimationBoardStyle,
   PERSONALIZATION_EVENT,
-  setBoardPresentation,
+  setAnimationBoardStyle,
+  setTaskListPresentation,
   setProjectManagementPresentation,
-  type BoardPresentation,
+  type AnimationBoardStyle,
+  type TaskListPresentation,
   type ProjectManagementPresentation,
 } from "@/lib/personalization";
 import { useSetCheckShell } from "@/lib/queries";
@@ -97,7 +102,8 @@ export function SettingsDialog({
   const [shell, setShell] = useState(checkShell ?? "");
   const [identityDraft, setIdentityDraft] = useState("");
   const [theme, setTheme] = useState<Theme>(getTheme);
-  const [boardPresentation, setBoardPresentationState] = useState<BoardPresentation>(getBoardPresentation);
+  const [taskListPresentation, setTaskListPresentationState] = useState<TaskListPresentation>(getTaskListPresentation);
+  const [animationBoardStyle, setAnimationBoardStyleState] = useState<AnimationBoardStyle>(getAnimationBoardStyle);
   const [projectManagementPresentation, setProjectManagementPresentationState] = useState<ProjectManagementPresentation>(getProjectManagementPresentation);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const saveShell = useSetCheckShell(path);
@@ -118,14 +124,18 @@ export function SettingsDialog({
     setIdentityDraft(displayName(actor));
     setTheme(getTheme());
     if (carbonMode) {
-      setBoardPresentationState(getBoardPresentation());
+      setTaskListPresentationState(getTaskListPresentation());
+      setAnimationBoardStyleState(getAnimationBoardStyle());
       setProjectManagementPresentationState(getProjectManagementPresentation());
     }
   }, [activeTab, actor, carbonMode, checkShell, open]);
 
   useEffect(() => {
     if (!carbonMode) return;
-    const syncBoardPresentation = () => setBoardPresentationState(getBoardPresentation());
+    const syncBoardPresentation = () => {
+      setTaskListPresentationState(getTaskListPresentation());
+      setAnimationBoardStyleState(getAnimationBoardStyle());
+    };
     window.addEventListener(PERSONALIZATION_EVENT, syncBoardPresentation);
     window.addEventListener("storage", syncBoardPresentation);
     return () => {
@@ -187,10 +197,16 @@ export function SettingsDialog({
     setProjectManagementPresentation(next);
   };
 
-  const changeBoardPresentation = (value: string) => {
+  const changeTaskListPresentation = (value: string) => {
     if (value !== "row" && value !== "card") return;
-    setBoardPresentationState(value);
-    setBoardPresentation(value);
+    setTaskListPresentationState(value);
+    setTaskListPresentation(value);
+  };
+
+  const changeAnimationBoardStyle = (value: string) => {
+    if (!isAnimationBoardStyle(value)) return;
+    setAnimationBoardStyleState(value);
+    setAnimationBoardStyle(value);
   };
 
   const changeAutostart = async (mode: AutostartMode) => {
@@ -287,7 +303,7 @@ export function SettingsDialog({
 
                 <Row
                   title={t("Identity", "身份")}
-                  desc={t("This name is used for task assignments and lease ownership.", "此名称用于任务分配和租约所有权。")}
+                  desc={t("This name appears in task assignments and take-over records.", "此名称会显示在任务分配和接手记录中。")}
                 >
                   <div className="flex items-center gap-1.5">
                     <Input value={identityDraft} onChange={(event) => setIdentityDraft(event.target.value)} placeholder="you" className="h-8 w-32 text-sm" />
@@ -363,8 +379,8 @@ export function SettingsDialog({
                           <FieldTitle>{t("Task presentation", "任务展示")}</FieldTitle>
                           <FieldDescription>
                             {t(
-                              "Use compact rows or roomy cards across every Carbon board.",
-                              "在所有 Carbon 看板中使用紧凑行模式或宽松卡片模式。",
+                              "Choose rows or cards for Tasks and Agent work. Visual board styles are configured separately below.",
+                              "任务与智能体工作始终保留原有功能，只在行模式和卡片模式之间切换。",
                             )}
                           </FieldDescription>
                         </FieldContent>
@@ -373,8 +389,9 @@ export function SettingsDialog({
                           variant="outline"
                           size="sm"
                           spacing={0}
-                          value={boardPresentation}
-                          onValueChange={changeBoardPresentation}
+                          value={taskListPresentation}
+                          onValueChange={changeTaskListPresentation}
+                          className="flex-wrap justify-end"
                           aria-label={t("Task presentation", "任务展示")}
                         >
                           <ToggleGroupItem value="row" aria-label={t("Row mode", "行模式")}>
@@ -385,6 +402,33 @@ export function SettingsDialog({
                             <PanelsTopLeft data-icon="inline-start" />
                             {t("Card", "卡片")}
                           </ToggleGroupItem>
+                        </ToggleGroup>
+                      </Field>
+                      <Field orientation="horizontal" className="items-center justify-between gap-4 border-t py-2.5">
+                        <FieldContent className="min-w-0">
+                          <FieldTitle>{t("Board style", "看板风格")}</FieldTitle>
+                          <FieldDescription>{t("Used only by the dedicated Board and floating window; task lists stay intact.", "仅用于“看板”和悬浮窗，不会替换任务或智能体工作页面。")}</FieldDescription>
+                        </FieldContent>
+                        <ToggleGroup
+                          type="single"
+                          variant="outline"
+                          size="sm"
+                          spacing={0}
+                          value={animationBoardStyle}
+                          onValueChange={changeAnimationBoardStyle}
+                          aria-label={t("Animation board style", "动画看板风格")}
+                        >
+                          {Object.values(ANIMATION_BOARD_STYLE_REGISTRY).map((definition) => (
+                            <ToggleGroupItem
+                              key={definition.id}
+                              value={definition.id}
+                              aria-label={t(definition.label.english, definition.label.chinese)}
+                              title={t(definition.description.english, definition.description.chinese)}
+                            >
+                              {definition.id === "pixel-agents" ? <Bot data-icon="inline-start" /> : <CandlestickChart data-icon="inline-start" />}
+                              {t(definition.label.english, definition.label.chinese)}
+                            </ToggleGroupItem>
+                          ))}
                         </ToggleGroup>
                       </Field>
                     </FieldGroup>

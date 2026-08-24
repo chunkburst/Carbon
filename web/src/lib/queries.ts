@@ -652,18 +652,60 @@ function refreshCarbonTasks(
 
 type CarbonTaskListCache = carbon.CarbonOptional<{ tasks?: api.Task[] }>;
 type CarbonTaskCache = carbon.CarbonOptional<api.Task>;
-type CarbonCacheSnapshot = Array<[readonly unknown[], unknown]>;
+type CarbonTaskFieldSnapshot<T> = Array<{
+  key: readonly unknown[];
+  kind: "list" | "detail";
+  value: T;
+}>;
 
-function carbonTaskCacheSnapshot(qc: QueryClient, scope: carbon.CarbonScopeInput): CarbonCacheSnapshot {
+function carbonTaskFieldSnapshot<T>(
+  qc: QueryClient,
+  scope: carbon.CarbonScopeInput,
+  id: string,
+  read: (task: api.Task) => T,
+): CarbonTaskFieldSnapshot<T> {
   const scopeKey = carbon.carbonScopeKey(scope);
-  return [
-    ...qc.getQueriesData({ queryKey: carbonKey("tasks", scopeKey) }),
-    ...qc.getQueriesData({ queryKey: carbonKey("task", scopeKey) }),
-  ];
+  const snapshot: CarbonTaskFieldSnapshot<T> = [];
+  for (const [key, result] of qc.getQueriesData<CarbonTaskListCache>({ queryKey: carbonKey("tasks", scopeKey) })) {
+    if (!result?.available) continue;
+    const task = result.data.tasks?.find((candidate) => candidate.id === id);
+    if (task) snapshot.push({ key, kind: "list", value: read(task) });
+  }
+  for (const [key, result] of qc.getQueriesData<CarbonTaskCache>({ queryKey: carbonKey("task", scopeKey) })) {
+    if (!result?.available || result.data.id !== id) continue;
+    snapshot.push({ key, kind: "detail", value: read(result.data) });
+  }
+  return snapshot;
 }
 
-function restoreCarbonTaskCacheSnapshot(qc: QueryClient, snapshot: CarbonCacheSnapshot): void {
-  for (const [key, value] of snapshot) qc.setQueryData(key, value);
+function restoreCarbonTaskFieldSnapshot<T>(
+  qc: QueryClient,
+  id: string,
+  snapshot: CarbonTaskFieldSnapshot<T>,
+  stillOptimistic: (task: api.Task) => boolean,
+  restore: (task: api.Task, value: T) => api.Task,
+): void {
+  for (const entry of snapshot) {
+    if (entry.kind === "list") {
+      qc.setQueryData<CarbonTaskListCache>(entry.key, (result) => {
+        if (!result?.available) return result;
+        return {
+          available: true,
+          data: {
+            ...result.data,
+            tasks: result.data.tasks?.map((task) => task.id === id && stillOptimistic(task)
+              ? restore(task, entry.value)
+              : task),
+          },
+        };
+      });
+      continue;
+    }
+    qc.setQueryData<CarbonTaskCache>(entry.key, (result) => {
+      if (!result?.available || result.data.id !== id || !stillOptimistic(result.data)) return result;
+      return { available: true, data: restore(result.data, entry.value) };
+    });
+  }
 }
 
 function updateCarbonTaskCaches(
@@ -956,14 +998,14 @@ export function useCarbonTaskTypes(scope: carbon.CarbonScopeInput) {
   });
 }
 
-export function useCarbonTasks(scope: carbon.CarbonScopeInput, includeCluster = false, enabled = true) {
-  const scopeKey = carbon.carbonScopeKey(scope);
-  return useQuery({
-    queryKey: carbonKey("tasks", scopeKey, includeCluster ? "cluster" : "project"),
-    queryFn: () => carbon.listCarbonTasks(scope, includeCluster),
-    enabled,
-    retry: false,
-  });
+export function useCarbonTasks(scope: carbon.CarbonScopeInput, includeCluster = false, enabled = true, marketHistory = false) {
+	const scopeKey = carbon.carbonScopeKey(scope);
+	return useQuery({
+		queryKey: carbonKey("tasks", scopeKey, includeCluster ? "cluster" : "project", ...(marketHistory ? ["market-history"] : [])),
+		queryFn: () => carbon.listCarbonTasks(scope, includeCluster, marketHistory),
+		enabled,
+		retry: false,
+	});
 }
 
 export function useCarbonTask(scope: carbon.CarbonScopeInput, id?: string, includeCluster = false) {
@@ -1140,21 +1182,39 @@ export function useTransitionCarbonTask(path: string, scope: carbon.CarbonScopeI
       const scopeKey = carbon.carbonScopeKey(scope);
       await qc.cancelQueries({ queryKey: carbonKey("tasks", scopeKey) });
       await qc.cancelQueries({ queryKey: carbonKey("task", scopeKey) });
-      const previous = carbonTaskCacheSnapshot(qc, scope);
+      const previous = carbonTaskFieldSnapshot(qc, scope, id, (task) => task.status);
       updateCarbonTaskCaches(qc, scope, id, (task) => ({ ...task, status: to }));
       return { previous };
     },
-    onError: (error, _variables, context) => {
-      if (context?.previous) restoreCarbonTaskCacheSnapshot(qc, context.previous);
+    onError: (error, variables, context) => {
+      if (context?.previous) {
+        restoreCarbonTaskFieldSnapshot(
+          qc,
+          variables.id,
+          context.previous,
+          (task) => task.status === variables.to,
+          (task, status) => ({ ...task, status }),
+        );
+      }
       fail(error);
     },
     onSuccess: (result, variables, context) => {
       if (!result.available) {
-        if (context?.previous) restoreCarbonTaskCacheSnapshot(qc, context.previous);
+        if (context?.previous) {
+          restoreCarbonTaskFieldSnapshot(
+            qc,
+            variables.id,
+            context.previous,
+            (task) => task.status === variables.to,
+            (task, status) => ({ ...task, status }),
+          );
+        }
         toast.message(translate("Kanban changes need a Carbon sidecar", "看板变更需要 Carbon sidecar"));
         return;
       }
-      updateCarbonTaskCaches(qc, scope, variables.id, () => result.data);
+      // Commit only the field owned by this mutation. A concurrent rank or detail
+      // edit must not be overwritten by an older full-task response.
+      updateCarbonTaskCaches(qc, scope, variables.id, (task) => ({ ...task, status: result.data.status }));
       toast.success(translate("Moved {id} to {status}", "已将 {id} 移至 {status}", {
         id: result.data.id,
         status: statusLabel(result.data.status),
@@ -1172,21 +1232,37 @@ export function useReorderCarbonTask(path: string, scope: carbon.CarbonScopeInpu
       const scopeKey = carbon.carbonScopeKey(scope);
       await qc.cancelQueries({ queryKey: carbonKey("tasks", scopeKey) });
       await qc.cancelQueries({ queryKey: carbonKey("task", scopeKey) });
-      const previous = carbonTaskCacheSnapshot(qc, scope);
+      const previous = carbonTaskFieldSnapshot(qc, scope, id, (task) => task.rank);
       updateCarbonTaskCaches(qc, scope, id, (task) => ({ ...task, rank }));
       return { previous };
     },
-    onError: (error, _variables, context) => {
-      if (context?.previous) restoreCarbonTaskCacheSnapshot(qc, context.previous);
+    onError: (error, variables, context) => {
+      if (context?.previous) {
+        restoreCarbonTaskFieldSnapshot(
+          qc,
+          variables.id,
+          context.previous,
+          (task) => task.rank === variables.rank,
+          (task, rank) => ({ ...task, rank }),
+        );
+      }
       fail(error);
     },
     onSuccess: (result, variables, context) => {
       if (!result.available) {
-        if (context?.previous) restoreCarbonTaskCacheSnapshot(qc, context.previous);
+        if (context?.previous) {
+          restoreCarbonTaskFieldSnapshot(
+            qc,
+            variables.id,
+            context.previous,
+            (task) => task.rank === variables.rank,
+            (task, rank) => ({ ...task, rank }),
+          );
+        }
         toast.message(translate("Kanban changes need a Carbon sidecar", "看板变更需要 Carbon sidecar"));
         return;
       }
-      updateCarbonTaskCaches(qc, scope, variables.id, () => result.data);
+      updateCarbonTaskCaches(qc, scope, variables.id, (task) => ({ ...task, rank: result.data.rank }));
     },
     onSettled: () => refreshCarbonTasks(qc, path, scope),
   });
@@ -1462,6 +1538,11 @@ export function useCarbonConfig(scope: carbon.CarbonScopeInput, enabled = true) 
     queryFn: () => carbon.getCarbonConfig(scope),
     enabled,
     staleTime: SETTINGS_STATIC_STALE_TIME_MS,
+    // Identity Mode may be toggled by another Carbon client. Until config changes
+    // join the scoped event stream, keep the compatibility boundary live alongside
+    // the Worker identity registry rather than leaving this browser stale for 5m.
+    refetchInterval: enabled ? 7_500 : false,
+    refetchIntervalInBackground: false,
     retry: false,
   });
 }
@@ -1470,11 +1551,44 @@ export function useSaveCarbonConfig(scope: carbon.CarbonScopeInput) {
   const scopeKey = carbon.carbonScopeKey(scope);
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { trashRetentionDays: number }) => carbon.saveCarbonConfig(scope, input),
-    onSuccess: (result) => {
+    mutationFn: (input: carbon.CarbonConfigUpdate) => carbon.saveCarbonConfig(scope, input),
+    onSuccess: (result, input) => {
       if (!result.available) return;
       qc.invalidateQueries({ queryKey: carbonKey("config", scopeKey) });
-      toast.success(translate("Trash retention saved", "垃圾站保留期限已保存"));
+      qc.invalidateQueries({ queryKey: carbonKey("worker-identities", scopeKey) });
+      toast.success(input.identityMode !== undefined
+        ? translate("Identity mode updated", "身份模式已更新")
+        : translate("Trash retention saved", "垃圾站保留期限已保存"));
+    },
+    onError: fail,
+  });
+}
+
+export function useCarbonWorkerIdentities(scope: carbon.CarbonScopeInput, enabled = true) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  return useQuery({
+    queryKey: carbonKey("worker-identities", scopeKey),
+    queryFn: () => carbon.listCarbonWorkerIdentities(scope),
+    enabled,
+    staleTime: SETTINGS_STATIC_STALE_TIME_MS,
+    // Identity claims may arrive through MCP rather than this browser. Until the
+    // scoped SSE contract grows an identity event, keep the roster reasonably live.
+    refetchInterval: enabled ? 7_500 : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
+}
+
+export function useUpdateCarbonWorkerIdentity(scope: carbon.CarbonScopeInput) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ actor, input }: { actor: string; input: carbon.CarbonWorkerIdentityUpdate }) =>
+      carbon.updateCarbonWorkerIdentity(scope, actor, input),
+    onSuccess: (result) => {
+      if (!result.available) return;
+      qc.invalidateQueries({ queryKey: carbonKey("worker-identities", scopeKey) });
+      toast.success(translate("Worker identity saved", "Worker 身份已保存"));
     },
     onError: fail,
   });

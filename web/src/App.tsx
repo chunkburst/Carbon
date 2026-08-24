@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FolderPlus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,9 +18,11 @@ import { Connect } from "@/pages/Connect";
 import { HomeShell } from "@/pages/HomeShell";
 import { CommandPalette } from "@/components/CommandPalette";
 import { CaptureView } from "@/components/CaptureView";
+import { CarbonFloatingWindowView } from "@/components/CarbonFloatingWindowView";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { clusterQueryKey, useCluster, useStatus, useTaskEvents } from "@/lib/queries";
 import { useDeepLinks, useDesktopMenu, useTrayMenu } from "@/lib/desktop-hooks";
+import { closeFloatingBoardWindow } from "@/lib/desktop";
 import { setCurrentClusterRoot, useCurrentClusterRoot } from "@/lib/clusters";
 import { isTauri, pickFolder } from "@/lib/tauri";
 import { lastWorkspace, registerWorkspace, resolveSlug } from "@/lib/workspaces";
@@ -40,6 +42,12 @@ function isCaptureRoute(): boolean {
   return window.location.hash.replace(/^#\/?/, "") === "capture";
 }
 
+// A native floating board gets its own webview at #floating-board?project=… and must not mount
+// the regular workspace shell behind it. The view itself validates every query value again.
+function isFloatingBoardRoute(): boolean {
+  return window.location.hash.replace(/^#\/?/, "").split("?", 1)[0] === "floating-board";
+}
+
 // macOS uses a frameless window (titleBarStyle: Overlay) — the traffic lights float over a
 // slim draggable strip, Linear-style. Other platforms keep their native title bar.
 function isMacDesktop(): boolean {
@@ -51,12 +59,66 @@ function TitleBar() {
   return <div data-tauri-drag-region className="h-7 shrink-0 bg-app" />;
 }
 
+type FloatingWindowErrorBoundaryState = { error: Error | null };
+
+/**
+ * A native floating webview must never fail into an uncloseable blank surface.  This boundary
+ * keeps a tiny inline fallback independent of the rest of the app's CSS/components so a render
+ * error, a chart/WebView incompatibility, or a stale cached bundle still leaves an escape hatch.
+ */
+class FloatingWindowErrorBoundary extends Component<{ children: ReactNode }, FloatingWindowErrorBoundaryState> {
+  state: FloatingWindowErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): FloatingWindowErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(): void {
+    // Keep the fallback quiet for users; the native shell remains responsible for diagnostics.
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <main
+        role="alert"
+        style={{
+          boxSizing: "border-box",
+          display: "grid",
+          minHeight: "100vh",
+          placeContent: "center",
+          gap: "12px",
+          padding: "24px",
+          background: "#10131c",
+          color: "#f4f6fb",
+          fontFamily: "Inter, Segoe UI, sans-serif",
+          textAlign: "center",
+        }}
+      >
+        <strong style={{ fontSize: "15px" }}>Carbon 工作窗暂时没有响应</strong>
+        <span style={{ color: "#aeb7ca", fontSize: "13px" }}>可以安全关闭这个窗口，再从主界面重新打开。</span>
+        <button
+          type="button"
+          onClick={() => { void closeFloatingBoardWindow(); }}
+          style={{ justifySelf: "center", cursor: "pointer", border: "1px solid #5d6a86", borderRadius: "8px", padding: "7px 14px", background: "#20283a", color: "#f4f6fb" }}
+        >
+          关闭工作窗
+        </button>
+      </main>
+    );
+  }
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delayDuration={200}>
         {isCaptureRoute() ? (
           <CaptureView />
+        ) : isFloatingBoardRoute() ? (
+          <FloatingWindowErrorBoundary>
+            <CarbonFloatingWindowView />
+          </FloatingWindowErrorBoundary>
         ) : (
           <div className="flex h-screen flex-col bg-app">
             <TitleBar />
