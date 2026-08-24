@@ -1,6 +1,6 @@
 [package]
 name = "carbon-desktop"
-version = "1.0.2"
+version = "1.0.3"
 description = "Carbon desktop app for the local task-graph tool."
 authors = ["chunkburst <chunkburst@outlook.com>"]
 license = "MIT"

@@ -9,6 +9,12 @@ the same value into the `carbon` CLI and MCP/API identity.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-08-24
+
+### Fixed
+
+- **越界错误一致性。** 将 `.carbon` 目录越界从仓库迁移层正确映射为 Store 层 `ErrPathOutsideRoot`，让跨平台安全路径测试和调用方得到一致的错误语义。
+
 ## [1.0.2] - 2026-08-24
 
 ### Fixed
