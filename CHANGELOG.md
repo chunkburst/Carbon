@@ -9,6 +9,13 @@ the same value into the `carbon` CLI and MCP/API identity.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-24
+
+### Fixed
+
+- **跨平台发布门禁。** 恢复 POSIX 原子写入在校验与发布期间保持临时文件句柄，并修正迁移摘要对容器根目录权限的处理；Linux release preflight 的全量 Go 测试现可稳定运行。
+- **测试稳定性。** 修复项目目录替换测试的 inode 复用竞态，并让显式 cluster 连接测试与当前 scope 约束保持一致。
+
 ## [1.0.1] - 2026-08-24
 
 ### Changed
