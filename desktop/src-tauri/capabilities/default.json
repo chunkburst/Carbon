@@ -27,8 +27,6 @@
     "allow-play-notification-sound",
     "allow-get-data-home",
     "allow-set-data-home",
-    "allow-open-floating-board",
-    "allow-close-floating-board",
     {
       "identifier": "shell:allow-spawn",
       "allow": [

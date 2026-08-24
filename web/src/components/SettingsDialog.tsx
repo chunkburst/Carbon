@@ -407,7 +407,7 @@ export function SettingsDialog({
                       <Field orientation="horizontal" className="items-center justify-between gap-4 border-t py-2.5">
                         <FieldContent className="min-w-0">
                           <FieldTitle>{t("Board style", "看板风格")}</FieldTitle>
-                          <FieldDescription>{t("Used only by the dedicated Board and floating window; task lists stay intact.", "仅用于“看板”和悬浮窗，不会替换任务或智能体工作页面。")}</FieldDescription>
+                          <FieldDescription>{t("Used only by the dedicated Board; task lists stay intact.", "仅用于“看板”，不会替换任务或智能体工作页面。")}</FieldDescription>
                         </FieldContent>
                         <ToggleGroup
                           type="single"

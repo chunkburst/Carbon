@@ -25,16 +25,6 @@ export const DEFAULT_ANIMATION_STYLE_METADATA: Readonly<AnimationStyleMetadata> 
   volatility: 200,
 };
 
-export type FloatingBoardPreference = {
-  open: boolean;
-  minimized: boolean;
-  pinned: boolean;
-  x?: number;
-  y?: number;
-  width: number;
-  height: number;
-};
-
 export type LastProjectSelection = {
   /** Absent for a standalone project; older records retain their cluster id. */
   clusterId?: string;
@@ -46,7 +36,6 @@ const BOARD_PRESENTATION_KEY = "carbon:board-presentation";
 const TASK_LIST_PRESENTATION_KEY = "carbon:task-list-presentation:v1";
 const WORKSPACE_TASK_SURFACE_KEY = "carbon:workspace-task-surface:v1";
 const ANIMATION_BOARD_STYLE_KEY = "carbon:animation-board-style";
-const FLOATING_BOARD_KEY = "carbon:floating-board:v1";
 const BOARD_STATUS_SECTIONS_PREFIX = "carbon:board-status-sections:v1:";
 const MARKET_TIMEFRAME_PREFIX = "carbon:market-timeframe:v1:";
 const ANIMATION_STYLE_METADATA_PREFIX = "carbon:animation-style-metadata:v1:";
@@ -234,54 +223,6 @@ export function setAnimationStyleMetadata(
       ANIMATION_VOLATILITY_MIN,
       ANIMATION_VOLATILITY_MAX,
     ),
-  }));
-}
-
-const DEFAULT_FLOATING_BOARD: FloatingBoardPreference = {
-  open: false,
-  minimized: false,
-  pinned: false,
-  width: 520,
-  height: 420,
-};
-
-function finitePreferenceNumber(value: unknown, fallback?: number): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-/**
- * The floating board is a workspace affordance rather than project data. Keeping a
- * single machine-local record means switching projects replaces only its task feed;
- * the window itself stays in the same place and state.
- */
-export function getFloatingBoardPreference(): FloatingBoardPreference {
-  try {
-    const value: unknown = JSON.parse(read(FLOATING_BOARD_KEY) ?? "null");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULT_FLOATING_BOARD };
-    const candidate = value as Partial<Record<keyof FloatingBoardPreference, unknown>>;
-    return {
-      open: candidate.open === true,
-      minimized: candidate.minimized === true,
-      pinned: candidate.pinned === true,
-      x: finitePreferenceNumber(candidate.x),
-      y: finitePreferenceNumber(candidate.y),
-      width: Math.max(360, finitePreferenceNumber(candidate.width, DEFAULT_FLOATING_BOARD.width)!),
-      height: Math.max(280, finitePreferenceNumber(candidate.height, DEFAULT_FLOATING_BOARD.height)!),
-    };
-  } catch {
-    return { ...DEFAULT_FLOATING_BOARD };
-  }
-}
-
-export function setFloatingBoardPreference(value: FloatingBoardPreference): void {
-  write(FLOATING_BOARD_KEY, JSON.stringify({
-    open: value.open,
-    minimized: value.minimized,
-    pinned: value.pinned,
-    ...(typeof value.x === "number" && Number.isFinite(value.x) ? { x: value.x } : {}),
-    ...(typeof value.y === "number" && Number.isFinite(value.y) ? { y: value.y } : {}),
-    width: Math.max(360, value.width),
-    height: Math.max(280, value.height),
   }));
 }
 

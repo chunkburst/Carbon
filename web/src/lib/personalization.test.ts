@@ -4,12 +4,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getAnimationStyleMetadata,
-  getFloatingBoardPreference,
   getMarketTimeframe,
   getTaskListPresentation,
   getWorkspaceTaskSurface,
   setAnimationStyleMetadata,
-  setFloatingBoardPreference,
   setMarketTimeframe,
   setTaskListPresentation,
   setWorkspaceTaskSurface,
@@ -35,52 +33,6 @@ function withWindow(run: (store: Map<string, string>) => void): void {
     else Reflect.deleteProperty(globalThis, "window");
   }
 }
-
-test("floating board bounds and window state round-trip", () => {
-  withWindow(() => {
-    setFloatingBoardPreference({
-      open: true,
-      minimized: true,
-      pinned: true,
-      x: 88,
-      y: 64,
-      width: 640,
-      height: 480,
-    });
-    assert.deepEqual(getFloatingBoardPreference(), {
-      open: true,
-      minimized: true,
-      pinned: true,
-      x: 88,
-      y: 64,
-      width: 640,
-      height: 480,
-    });
-  });
-});
-
-test("floating board rejects malformed geometry and preserves safe minimums", () => {
-  withWindow((store) => {
-    store.set("carbon:floating-board:v1", JSON.stringify({
-      open: "yes",
-      minimized: 1,
-      pinned: null,
-      x: "outside",
-      y: Number.NaN,
-      width: 12,
-      height: -50,
-    }));
-    assert.deepEqual(getFloatingBoardPreference(), {
-      open: false,
-      minimized: false,
-      pinned: false,
-      x: undefined,
-      y: undefined,
-      width: 360,
-      height: 280,
-    });
-  });
-});
 
 test("task list presentation is independent from the legacy animation board choice", () => {
   withWindow((store) => {

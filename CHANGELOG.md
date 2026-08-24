@@ -9,6 +9,16 @@ the same value into the `carbon` CLI and MCP/API identity.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-24
+
+### Removed
+
+- **悬浮窗。** 移除无法稳定工作的独立悬浮任务看板、原生窗口命令、权限和设置入口；Carbon 现在只保留主工作区与 Quick Capture，避免白屏、卡死和无法关闭的问题。
+
+### Changed
+
+- **发布一致性。** 桌面端、CLI、Web 和文档包统一标记为 v1.1.0，并继续通过 Windows、macOS（Apple Silicon / Intel）与 Linux（x64 / ARM64）的发布门禁。
+
 ## [1.0.3] - 2026-08-24
 
 ### Fixed

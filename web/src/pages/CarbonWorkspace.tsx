@@ -12,7 +12,6 @@ import {
   ListChecks,
   Network,
   Moon,
-  PictureInPicture2,
   Plug,
   ScanEye,
   Search,
@@ -28,7 +27,6 @@ import type { Filter } from "@/components/AppSidebar";
 import type { CatalogIconMutation, CatalogPresentationIcons } from "@/components/CatalogIcon";
 import { CarbonProjectSwitcher } from "@/components/CarbonProjectSwitcher";
 import { CarbonTaskList } from "@/components/CarbonTaskList";
-import { CarbonFloatingBoard } from "@/components/CarbonFloatingBoard";
 import { WorkspaceBackgroundContextMenu } from "@/components/WorkspaceBackgroundContextMenu";
 import type { TaskNavigationTarget } from "@/components/WorkLogTypes";
 import { CarbonConnectPanel } from "@/pages/Connect";
@@ -94,21 +92,8 @@ import { carbonImportanceLabel, carbonTaskTypeLabel } from "@/lib/task-labels";
 import { isMultiProjectCluster } from "@/lib/carbon-projects";
 import { getTheme, toggleTheme, type Theme } from "@/lib/theme";
 import {
-  closeFloatingBoard,
-  isTauri,
-  onFloatingBoardClosed,
-  openFloatingBoard,
-  type FloatingBoardTarget,
-} from "@/lib/desktop";
-import {
-  getAnimationBoardStyle,
-  getFloatingBoardPreference,
   getWorkspaceTaskSurface,
-  PERSONALIZATION_EVENT,
-  setFloatingBoardPreference,
   setWorkspaceTaskSurface,
-  type AnimationBoardStyle,
-  type FloatingBoardPreference,
   type WorkspaceTaskSurface,
 } from "@/lib/personalization";
 
@@ -164,20 +149,6 @@ function useDebouncedValue<T>(value: T, delay = 180): T {
   return debounced;
 }
 
-function usePrefersReducedMotion(): boolean {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setPrefersReducedMotion(query.matches);
-    sync();
-    query.addEventListener("change", sync);
-    return () => query.removeEventListener("change", sync);
-  }, []);
-  return prefersReducedMotion;
-}
-
 function carbonWorkflowStatus(home: string, tasks: Task[]): Status {
   const defaults = ["backlog", "ready", "in_progress", "review", "done"];
   const discovered = tasks.map((task) => task.status).filter(Boolean);
@@ -223,18 +194,12 @@ export function CarbonWorkspace({
   const [taskScope, setTaskScope] = useState<TaskScope>("project");
   const [sidebarFilter, setSidebarFilter] = useState<Filter>("all");
   const [taskSurface, setTaskSurfaceState] = useState<WorkspaceTaskSurface>(getWorkspaceTaskSurface);
-  const [floatingBoard, setFloatingBoard] = useState<FloatingBoardPreference>(getFloatingBoardPreference);
-  const [nativeFloatingBoardActive, setNativeFloatingBoardActive] = useState(
-    () => isTauri() && getFloatingBoardPreference().open,
-  );
-  const [floatingStyle, setFloatingStyle] = useState<AnimationBoardStyle>(getAnimationBoardStyle);
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getTheme);
   const [connectOpen, setConnectOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const prefersReducedMotion = usePrefersReducedMotion();
   const canUseClusterScope = Boolean(cluster && isMultiProjectCluster(cluster));
   const scope = useMemo<CarbonScope>(
     () => ({ home, clusterId: cluster?.id, projectId: project.id }),
@@ -260,11 +225,6 @@ export function CarbonWorkspace({
   // include-cluster escape hatch.
   const boardScope = taskScope === "cluster" && canUseClusterScope ? clusterScope : scope;
   const boardScopeKey = useMemo(() => carbonScopeKey(boardScope), [boardScope]);
-  const floatingBoardTarget = useMemo<FloatingBoardTarget>(() => ({
-    ...(cluster?.id ? { clusterId: cluster.id } : {}),
-    ...(taskScope === "cluster" && canUseClusterScope ? {} : { projectId: project.id }),
-    workspaceProjectId: project.id,
-  }), [canUseClusterScope, cluster, project.id, taskScope]);
   // The opt-in market history contains only action, actor, and timestamp. Task/log
   // text stays out of this list response while the animation view gains real causes.
   const taskQuery = useCarbonTasks(boardScope, false, true, true);
@@ -288,61 +248,6 @@ export function CarbonWorkspace({
     if (!canUseClusterScope) setTaskScope("project");
   }, [canUseClusterScope]);
 
-  useEffect(() => {
-    const syncFloatingBoard = () => {
-      setFloatingBoard(getFloatingBoardPreference());
-      setFloatingStyle(getAnimationBoardStyle());
-    };
-    window.addEventListener(PERSONALIZATION_EVENT, syncFloatingBoard);
-    window.addEventListener("storage", syncFloatingBoard);
-    return () => {
-      window.removeEventListener(PERSONALIZATION_EVENT, syncFloatingBoard);
-      window.removeEventListener("storage", syncFloatingBoard);
-    };
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    let stopListening = () => {};
-    void onFloatingBoardClosed(() => {
-      if (disposed) return;
-      setNativeFloatingBoardActive(false);
-      const current = getFloatingBoardPreference();
-      if (!current.open) return;
-      const next = { ...current, open: false };
-      setFloatingBoard(next);
-      setFloatingBoardPreference(next);
-    }).then((unlisten) => {
-      if (disposed) unlisten();
-      else stopListening = unlisten;
-    });
-    return () => {
-      disposed = true;
-      stopListening();
-    };
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    if (!floatingBoard.open) {
-      setNativeFloatingBoardActive(false);
-      void closeFloatingBoard();
-      return () => { disposed = true; };
-    }
-
-    // Suppress the in-page fallback while the native window is opening. If the
-    // desktop channel is unavailable, it is restored immediately after the call.
-    if (isTauri()) setNativeFloatingBoardActive(true);
-    void openFloatingBoard(floatingBoardTarget).then((result) => {
-      if (!disposed) setNativeFloatingBoardActive(result === "opened");
-    });
-    return () => { disposed = true; };
-  }, [floatingBoard.open, floatingBoardTarget]);
-
-  const changeFloatingBoard = useCallback((next: FloatingBoardPreference) => {
-    setFloatingBoard(next);
-    setFloatingBoardPreference(next);
-  }, []);
   const changeTaskSurface = useCallback((next: WorkspaceTaskSurface) => {
     setTaskSurfaceState(next);
     setWorkspaceTaskSurface(next);
@@ -592,16 +497,6 @@ export function CarbonWorkspace({
               <Plug data-icon="inline-start" />
               {t("Connect", "连接")}
             </Button>
-            <Button
-              variant={floatingBoard.open ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label={floatingBoard.open ? t("Close floating window", "关闭悬浮窗") : t("Open floating window", "打开悬浮窗")}
-              aria-pressed={floatingBoard.open}
-              title={floatingBoard.open ? t("Close floating window", "关闭悬浮窗") : t("Open floating window", "打开悬浮窗")}
-              onClick={() => changeFloatingBoard({ ...floatingBoard, open: !floatingBoard.open })}
-            >
-              <PictureInPicture2 />
-            </Button>
             <CarbonNotificationBell
               scope={scope}
               actor={actor}
@@ -761,8 +656,6 @@ export function CarbonWorkspace({
               tasks={taskSurface === "board" ? tasks : boardTasks}
               status={status}
               surface={taskSurface}
-              floatingBoardOpen={floatingBoard.open}
-              onFloatingBoardToggle={() => changeFloatingBoard({ ...floatingBoard, open: !floatingBoard.open })}
               projects={workspaceProjects}
               loading={taskQuery.isLoading}
               unavailable={!taskQuery.isLoading && taskQuery.data?.available === false}
@@ -830,18 +723,6 @@ export function CarbonWorkspace({
         onOpenTask={openTask}
       />
       <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
-      {!nativeFloatingBoardActive && (
-        <CarbonFloatingBoard
-          projectKey={boardScopeKey}
-          preference={floatingBoard}
-          style={floatingStyle}
-          tasks={tasks}
-          status={status}
-          prefersReducedMotion={prefersReducedMotion}
-          onPreferenceChange={changeFloatingBoard}
-          onOpenTask={openTask}
-        />
-      )}
       </div>
     </WorkerAliasProvider>
   );
@@ -855,8 +736,6 @@ function CarbonBoard({
   tasks,
   status,
   surface,
-  floatingBoardOpen,
-  onFloatingBoardToggle,
   projects,
   loading,
   unavailable,
@@ -873,8 +752,6 @@ function CarbonBoard({
   tasks: Task[];
   status: Status;
   surface: WorkspaceTaskSurface;
-  floatingBoardOpen: boolean;
-  onFloatingBoardToggle: () => void;
   projects: CarbonHomeProject[];
   loading: boolean;
   unavailable: boolean;
@@ -1206,8 +1083,6 @@ function CarbonBoard({
           tasks={tasks}
           status={status}
           surface={surface}
-          floatingBoardOpen={floatingBoardOpen}
-          onFloatingBoardToggle={onFloatingBoardToggle}
            onTransition={handleTransition}
            onReorder={handleReorder}
            onTrashTask={requestTrash}

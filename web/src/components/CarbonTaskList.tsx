@@ -23,7 +23,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, CandlestickChart, CheckCircle2, ChevronRight, GitBranch, GripVertical, Inbox, LayoutGrid, List, Loader2, MoreHorizontal, PictureInPicture2, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
+import { Bot, CandlestickChart, CheckCircle2, ChevronRight, GitBranch, GripVertical, Inbox, LayoutGrid, List, Loader2, MoreHorizontal, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
 import { Assignee } from "@/components/Assignee";
 import { CarbonAnimationBoard } from "@/components/CarbonAnimationBoard";
 import { BoardBackgroundContextMenu } from "@/components/BoardBackgroundContextMenu";
@@ -37,7 +37,6 @@ import { SessionStatus } from "@/components/SessionStatus";
 import { StatusIcon } from "@/components/StatusIcon";
 import { TaskMetadata } from "@/components/TaskMetadata";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
@@ -146,8 +145,6 @@ type CarbonTaskListProps = {
   toolbarExtras?: ReactNode;
   /** Functional lists and the visual board are intentionally separate surfaces. */
   surface?: CarbonTaskListSurface;
-  floatingBoardOpen?: boolean;
-  onFloatingBoardToggle?: () => void;
   bulkMode?: boolean;
   selectedIds?: ReadonlySet<string>;
   onSelectionChange?: (ids: Set<string>) => void;
@@ -177,8 +174,6 @@ export function CarbonTaskList({
   onFiltersChange,
   toolbarExtras,
   surface = "tasks",
-  floatingBoardOpen = false,
-  onFloatingBoardToggle,
   bulkMode = false,
   selectedIds,
   onSelectionChange,
@@ -568,19 +563,6 @@ export function CarbonTaskList({
               </>
             )}
           </ToggleGroup>
-          {onFloatingBoardToggle && (
-            <Button
-              type="button"
-              variant={floatingBoardOpen ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label={floatingBoardOpen ? t("Close floating board", "关闭悬浮窗") : t("Open floating board", "打开悬浮窗")}
-              aria-pressed={floatingBoardOpen}
-              title={floatingBoardOpen ? t("Close floating board", "关闭悬浮窗") : t("Open floating board", "打开悬浮窗")}
-              onClick={onFloatingBoardToggle}
-            >
-              <PictureInPicture2 />
-            </Button>
-          )}
           {toolbarExtras}
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -644,7 +626,6 @@ export function CarbonTaskList({
           presentation={presentation}
           surface={surface}
           animationStyle={animationStyle}
-          floatingBoardOpen={floatingBoardOpen}
           onNewTask={onNewTask}
           onSearch={() => searchRef.current?.focus()}
           onRefresh={onRefresh ?? (() => undefined)}
@@ -653,7 +634,6 @@ export function CarbonTaskList({
           onClearFilters={activeFilters ? clearFilters : undefined}
           onPresentationChange={changePresentation}
           onAnimationStyleChange={changeBoardSurface}
-          onFloatingBoardToggle={onFloatingBoardToggle}
         >
           {loading ? (
             <div className="space-y-1.5 px-3 py-2">

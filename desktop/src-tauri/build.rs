@@ -16,9 +16,6 @@ fn main() {
             "play_notification_sound",
             "get_data_home",
             "set_data_home",
-            "open_floating_board",
-            "close_floating_board",
-            "focus_main_task",
         ]));
 
     // GNU windres cannot open an icon through a path containing non-ASCII characters.

@@ -8,7 +8,6 @@ import {
   FilePlus2,
   FilterX,
   PanelsTopLeft,
-  PictureInPicture2,
   RefreshCw,
   Rows3,
   Search,
@@ -33,7 +32,6 @@ type BoardBackgroundContextMenuProps = {
   surface: "tasks" | "agent-work" | "board";
   presentation: BoardPresentation;
   animationStyle: AnimationBoardStyle;
-  floatingBoardOpen: boolean;
   onNewTask: () => void;
   onSearch: () => void;
   onRefresh: () => void;
@@ -42,7 +40,6 @@ type BoardBackgroundContextMenuProps = {
   onClearFilters?: () => void;
   onPresentationChange: (presentation: TaskListPresentation) => void;
   onAnimationStyleChange: (style: AnimationBoardStyle) => void;
-  onFloatingBoardToggle?: () => void;
 };
 
 /**
@@ -57,7 +54,6 @@ export function BoardBackgroundContextMenu({
   surface,
   presentation,
   animationStyle,
-  floatingBoardOpen,
   onNewTask,
   onSearch,
   onRefresh,
@@ -66,7 +62,6 @@ export function BoardBackgroundContextMenu({
   onClearFilters,
   onPresentationChange,
   onAnimationStyleChange,
-  onFloatingBoardToggle,
 }: BoardBackgroundContextMenuProps) {
   const { t } = useI18n();
   const ignoreTaskSurface = (event: MouseEvent<HTMLDivElement>) => {
@@ -159,18 +154,6 @@ export function BoardBackgroundContextMenu({
             </>
           )}
         </ContextMenuGroup>
-        {onFloatingBoardToggle && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuGroup>
-              <ContextMenuItem onSelect={onFloatingBoardToggle}>
-                <PictureInPicture2 />
-                {floatingBoardOpen ? t("Close floating window", "关闭悬浮窗") : t("Open floating window", "打开悬浮窗")}
-                {floatingBoardOpen && <Check className="ml-auto" />}
-              </ContextMenuItem>
-            </ContextMenuGroup>
-          </>
-        )}
       </ContextMenuContent>
     </ContextMenu>
   );

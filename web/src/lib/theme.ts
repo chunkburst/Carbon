@@ -5,11 +5,10 @@ export type Theme = "light" | "dark";
 const KEY = "carbon-theme";
 const LEGACY_KEY = "cairn-theme";
 
-// WebView2 can briefly expose a storage area that is unavailable (for example while a
-// secondary native webview is being initialized, or when its profile is locked by another
-// process). Theme setup runs before React mounts, so a storage exception here would leave the
-// entire floating window on the native blank/black surface. Keep the preference best-effort and
-// always fall back to the system theme for that session.
+// A desktop WebView can briefly expose a storage area that is unavailable (for example while
+// its profile is locked by another process). Theme setup runs before React mounts, so a storage
+// exception must never prevent the main Carbon surface from rendering. Keep the preference
+// best-effort and always fall back to the system theme for that session.
 function readStorage(key: string): string | null {
   try {
     return localStorage.getItem(key);
