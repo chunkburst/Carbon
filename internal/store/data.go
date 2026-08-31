@@ -61,6 +61,12 @@ func (s *Store) ListData(dir string) ([]string, error) {
 // ReadData reads a metadata file while holding the store transaction lock.
 func (tx *WriteTx) ReadData(dir, name string) ([]byte, error) { return tx.store.ReadData(dir, name) }
 
+// ListData lists managed metadata while the caller already holds Store.Write's
+// repository lock. It is intentionally the transaction counterpart of
+// Store.ListData: small durable sidecars that use one record per mutation can
+// enumerate a consistent collection without opening a nested transaction.
+func (tx *WriteTx) ListData(dir string) ([]string, error) { return tx.store.ListData(dir) }
+
 // WriteData atomically writes a metadata file inside the current store transaction.
 func (tx *WriteTx) WriteData(dir, name string, data []byte) error {
 	path, err := tx.store.dataFilePath(dir, name, true, false, true)

@@ -18,6 +18,7 @@ import (
 	"carbon/internal/lease"
 	"carbon/internal/session"
 	"carbon/internal/store"
+	"carbon/internal/subscription"
 	"carbon/internal/task"
 	tasktypes "carbon/internal/types"
 )
@@ -151,14 +152,36 @@ func (svc *Service) depResolver() task.DepResolver {
 	}
 }
 
-// TaskView is a task plus derived fields: readiness (SPEC §4: computed, not stored) and the
-// last-activity timestamp (newest provenance entry) for "updated X ago" displays.
+const (
+	// ActivityHealthFresh means an open task still has recent meaningful work, or a
+	// closed task has a known last meaningful activity. It is deliberately separate
+	// from execution state: a session can be stalled while a task is still fresh.
+	ActivityHealthFresh = "fresh"
+	// ActivityHealthStagnant means an open task has crossed its configured inactivity
+	// window. It never overwrites Status or ExecutionState.
+	ActivityHealthStagnant = "stagnant"
+	// ActivityHealthUnknown means no valid meaningful provenance timestamp exists.
+	ActivityHealthUnknown = "unknown"
+)
+
+// TaskActivity is the time-derived health projection shared by task list, task detail,
+// and task-market history responses. None of these fields are persisted on a task.
+type TaskActivity struct {
+	Health           string `json:"activityHealth"`
+	LastMeaningfulAt string `json:"lastMeaningfulAt,omitempty"`
+	StagnantAt       string `json:"stagnantAt,omitempty"`
+}
+
+// TaskView is a task plus derived fields: readiness (SPEC §4: computed, not stored), the
+// last-activity timestamp (newest provenance entry) for "updated X ago" displays, and
+// a health dimension derived only from meaningful provenance.
 type TaskView struct {
 	task.Task
 	Ready          bool   `json:"ready"`
 	UpdatedAt      string `json:"updatedAt,omitempty"`
 	ExecutionState string `json:"executionState,omitempty"`
 	SessionID      string `json:"sessionId,omitempty"`
+	TaskActivity
 	// Provenance is a deliberately redacted, HTTP-only list projection used by the
 	// optional task-market view. Keep it out of normal TaskView JSON so MCP list
 	// responses retain their established summary shape.
@@ -255,7 +278,8 @@ func (svc *Service) listScoped(status, assignee string, ready *bool, execution s
 		if execution != "" && execution != executionState {
 			continue
 		}
-		view := TaskView{Task: t, Ready: r, UpdatedAt: lastActivity(d), ExecutionState: executionState, SessionID: sessionID}
+		view := TaskView{Task: t, Ready: r, UpdatedAt: lastActivity(d), ExecutionState: executionState, SessionID: sessionID,
+			TaskActivity: deriveTaskActivity(t, d.Provenance, cfg, svc.now())}
 		if withMarketHistory {
 			view.Provenance = marketProvenance(d.Provenance)
 		}
@@ -263,6 +287,85 @@ func (svc *Service) listScoped(status, assignee string, ready *bool, execution s
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// ActivityOf derives the task-health surface used by single-task responses. A config
+// read failure degrades safely to unknown rather than pretending an old task is fresh.
+func (svc *Service) ActivityOf(doc *store.Doc) TaskActivity {
+	if doc == nil {
+		return TaskActivity{Health: ActivityHealthUnknown}
+	}
+	cfg, err := svc.store.Config()
+	if err != nil {
+		return TaskActivity{Health: ActivityHealthUnknown}
+	}
+	return deriveTaskActivity(doc.Task, doc.Provenance, cfg, svc.now())
+}
+
+// deriveTaskActivity derives a separate health dimension without changing workflow
+// Status or session ExecutionState. Closed tasks retain their historical timestamps but
+// never report stagnant, even when they were old before closing.
+func deriveTaskActivity(t task.Task, entries []store.Provenance, cfg config.Config, now time.Time) TaskActivity {
+	last, ok := latestMeaningfulActivity(entries)
+	if !ok {
+		return TaskActivity{Health: ActivityHealthUnknown}
+	}
+	stagnantAt := last.Add(cfg.TaskStagnationDuration())
+	activity := TaskActivity{
+		Health:           ActivityHealthFresh,
+		LastMeaningfulAt: last.Format(time.RFC3339Nano),
+		StagnantAt:       stagnantAt.Format(time.RFC3339Nano),
+	}
+	if !slices.Contains(cfg.Closed, t.Status) && !now.UTC().Before(stagnantAt) {
+		activity.Health = ActivityHealthStagnant
+	}
+	return activity
+}
+
+// latestMeaningfulActivity ignores bookkeeping entries that merely refresh a lease or
+// represent a read/poll. All normal task provenance (creation, state changes, claims,
+// notes, checks, blockers, assignment changes, and work outcomes) remains meaningful.
+// A note edit is activity at its edit timestamp, which is newer than the entry's
+// original creation timestamp without manufacturing a separate heartbeat provenance.
+func latestMeaningfulActivity(entries []store.Provenance) (time.Time, bool) {
+	var latest time.Time
+	for _, entry := range entries {
+		if !meaningfulProvenance(entry) {
+			continue
+		}
+		at, ok := parseActivityTime(entry.At)
+		if !ok {
+			continue
+		}
+		if editedAt, ok := parseActivityTime(entry.EditedAt); ok && editedAt.After(at) {
+			at = editedAt
+		}
+		if latest.IsZero() || at.After(latest) {
+			latest = at
+		}
+	}
+	return latest, !latest.IsZero()
+}
+
+func parseActivityTime(raw string) (time.Time, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return at.UTC(), true
+}
+
+func meaningfulProvenance(entry store.Provenance) bool {
+	did := strings.ToLower(strings.TrimSpace(entry.Did))
+	switch did {
+	case "", "heartbeat", "session heartbeat", "reorder", "reordered",
+		"lease renewed", "session lease renewed", "lease auto-released":
+		return false
+	}
+	return !strings.HasPrefix(did, "read") && !strings.HasPrefix(did, "poll")
 }
 
 func marketProvenance(entries []store.Provenance) []MarketProvenance {
@@ -516,11 +619,32 @@ func (svc *Service) CreateContext(ctx context.Context, d store.Draft) (*store.Do
 		if err := svc.validateProject(d.ProjectID); err != nil {
 			return nil, err
 		}
-		return svc.store.CreateExplicit(ctx, svc.actor, store.ExplicitDraft{
+		explicit := store.ExplicitDraft{
 			Title: d.Title, Body: d.Body, BlockerReason: d.BlockerReason, Evidence: d.Evidence, Deps: d.Deps, Checks: d.Checks, Labels: d.Labels,
 			Priority: d.Priority, Parent: d.Parent, Rank: d.Rank, ProjectID: d.ProjectID,
 			ClusterWide: d.ProjectID == "" && d.ProjectIDSet, Type: d.Type, Importance: d.Importance,
+		}
+		manager, projectID, enabled, err := svc.optionalEventSubscriptionManager()
+		if err != nil {
+			return nil, err
+		}
+		if !enabled {
+			return svc.store.CreateExplicit(ctx, svc.actor, explicit)
+		}
+		var created *store.Doc
+		err = svc.store.Write(ctx, svc.actor, "create task with event ledger", func(tx *store.WriteTx) error {
+			var prepared *subscription.PreparedEvent
+			var createErr error
+			created, createErr = tx.CreateExplicitWithBeforeSave(svc.actor, explicit, svc.now(), func(doc *store.Doc) error {
+				prepared, createErr = svc.prepareTaskEventTx(tx, manager, projectID, doc, "created")
+				return createErr
+			})
+			if createErr != nil {
+				return createErr
+			}
+			return commitPreparedTaskEventTx(tx, manager, prepared)
 		})
+		return created, err
 	}
 	return svc.store.Create(d, svc.actor, svc.now())
 }
@@ -726,7 +850,38 @@ func (svc *Service) UpdateWithVersion(id string, f UpdateFields, expectedVersion
 	} else {
 		doc.AppendProvenance(svc.actor, "updated", "", at)
 	}
-	if err := svc.store.SaveIfVersion(doc, expectedVersion); err != nil {
+	manager, projectID, enabled, err := svc.optionalEventSubscriptionManager()
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		if err := svc.store.SaveIfVersion(doc, expectedVersion); err != nil {
+			return nil, err
+		}
+		return doc, nil
+	}
+	eventKind := "updated"
+	if f.BlockerReason != nil && blockerWasSet != blockerIsSet {
+		if blockerIsSet {
+			eventKind = "blocked"
+		} else {
+			eventKind = "unblocked"
+		}
+	}
+	err = svc.store.Write(context.Background(), svc.actor, "update task with event ledger", func(tx *store.WriteTx) error {
+		if err := doc.MatchVersion(expectedVersion); err != nil {
+			return err
+		}
+		prepared, err := svc.prepareTaskEventTx(tx, manager, projectID, doc, eventKind)
+		if err != nil {
+			return err
+		}
+		if err := tx.SaveTask(doc); err != nil {
+			return err
+		}
+		return commitPreparedTaskEventTx(tx, manager, prepared)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return doc, nil
@@ -898,7 +1053,7 @@ func (svc *Service) TransitionContext(ctx context.Context, id, to string) (*stor
 	// result can be stale relative to the current code. Other transitions commit directly.
 	gated := rules.IsClosed(to) || (rules.Review != "" && to == rules.Review)
 	if !gated {
-		return svc.commitTransition(doc, to) // gateErr is nil: only closed/review gate checks
+		return svc.commitTransition(ctx, doc, to) // gateErr is nil: only closed/review gate checks
 	}
 
 	if err := svc.runCmdChecks(ctx, doc, cfg, nil); err != nil {
@@ -914,19 +1069,39 @@ func (svc *Service) TransitionContext(ctx context.Context, id, to string) (*stor
 	}
 	doc.SetStatus(to)
 	doc.AppendProvenance(svc.actor, "transitioned to "+to, "", svc.now())
-	if err := svc.store.Save(doc); err != nil {
+	if err := svc.saveTaskWithEvent(ctx, doc, "status_changed"); err != nil {
 		return nil, err
 	}
 	return doc, nil
 }
 
-func (svc *Service) commitTransition(doc *store.Doc, to string) (*store.Doc, error) {
+func (svc *Service) commitTransition(ctx context.Context, doc *store.Doc, to string) (*store.Doc, error) {
 	doc.SetStatus(to)
 	doc.AppendProvenance(svc.actor, "transitioned to "+to, "", svc.now())
-	if err := svc.store.Save(doc); err != nil {
+	if err := svc.saveTaskWithEvent(ctx, doc, "status_changed"); err != nil {
 		return nil, err
 	}
 	return doc, nil
+}
+
+func (svc *Service) saveTaskWithEvent(ctx context.Context, doc *store.Doc, eventKind string) error {
+	manager, projectID, enabled, err := svc.optionalEventSubscriptionManager()
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return svc.store.Save(doc)
+	}
+	return svc.store.Write(ctx, svc.actor, "save task with event ledger", func(tx *store.WriteTx) error {
+		prepared, err := svc.prepareTaskEventTx(tx, manager, projectID, doc, eventKind)
+		if err != nil {
+			return err
+		}
+		if err := tx.SaveTask(doc); err != nil {
+			return err
+		}
+		return commitPreparedTaskEventTx(tx, manager, prepared)
+	})
 }
 
 // RunChecks runs the cmd checks (all by default, or the indices in `only`) and writes

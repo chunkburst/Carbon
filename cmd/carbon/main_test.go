@@ -44,8 +44,8 @@ func TestParentWatchUsesCarbonEnvAndKeepsLegacyFallback(t *testing.T) {
 }
 
 func TestUsageMarksRemoteFlagDisabled(t *testing.T) {
-	if !strings.Contains(usageText, "Carbon V1.0.0") {
-		t.Fatalf("usage does not identify the V1.0.0 product release:\n%s", usageText)
+	if !strings.Contains(usageText, "Carbon V1.1.2") {
+		t.Fatalf("usage does not identify the V1.1.2 product release:\n%s", usageText)
 	}
 	if !strings.Contains(usageText, "--allow-remote (disabled)") {
 		t.Fatalf("web usage does not mark --allow-remote disabled:\n%s", usageText)

@@ -43,13 +43,24 @@ var (
 	ErrNotFound             = errors.New("worker identity not found")
 	ErrInvalidIdentity      = errors.New("invalid worker identity")
 	ErrChangeReasonRequired = errors.New("identity changes require a reason")
+	// ErrLegacyProjectionConflict means a legacy registry.yaml was changed after
+	// a standalone canonical identity journal recorded the projection baseline.
+	// Failing closed avoids silently overwriting an older Carbon binary's work.
+	ErrLegacyProjectionConflict = errors.New("legacy identity projection conflicts with canonical state")
+	ErrProjectRequired          = errors.New("identity manager requires a project id")
 )
 
 // Record is one Worker-owned assignment of a durable role and the task types it is
 // allowed to take when IdentityMode is enabled. ClaimedAt never changes; UpdatedAt,
 // ChangedBy, and Reason provide the audit trail for later role/type changes.
 type Record struct {
-	Actor     string   `yaml:"actor" json:"actor"`
+	Actor string `yaml:"actor" json:"actor"`
+	// Roles is the canonical, composable set of stable Worker role keys. It is
+	// deliberately excluded from registry.yaml: that file remains a rebuildable
+	// legacy projection that an older Carbon binary can decode with KnownFields.
+	Roles []string `yaml:"-" json:"roles"`
+	// Role remains the legacy primary-role alias. New callers should use Roles;
+	// the alias is retained for old API clients and old registry.yaml files.
 	Role      string   `yaml:"role" json:"role"`
 	Types     []string `yaml:"types" json:"types"`
 	ClaimedAt string   `yaml:"claimed_at" json:"claimedAt"`
@@ -69,9 +80,53 @@ type Registry struct {
 // Worker while MCP's self-service method always fills Actor from its fixed connection.
 type ClaimInput struct {
 	Actor  string
+	Roles  []string
 	Role   string
 	Types  []string
 	Reason string
+}
+
+// Audit is append-only evidence of an actual Worker identity claim or change. It
+// remains durable even when a project enables NoTraceMode.
+type Audit struct {
+	ID                string   `yaml:"id" json:"id"`
+	Actor             string   `yaml:"actor" json:"actor"`
+	Operation         string   `yaml:"operation" json:"operation"`
+	BeforeRoles       []string `yaml:"before_roles,omitempty" json:"beforeRoles,omitempty"`
+	BeforeTypes       []string `yaml:"before_types,omitempty" json:"beforeTypes,omitempty"`
+	AfterRoles        []string `yaml:"after_roles" json:"afterRoles"`
+	AfterTypes        []string `yaml:"after_types" json:"afterTypes"`
+	ChangedBy         string   `yaml:"changed_by" json:"changedBy"`
+	Reason            string   `yaml:"reason,omitempty" json:"reason,omitempty"`
+	At                string   `yaml:"at" json:"at"`
+	RelatedIncidentID string   `yaml:"related_incident_id,omitempty" json:"relatedIncidentId,omitempty"`
+}
+
+// AutoIncident is the process-facing Incident created together with an identity
+// audit when tracing is enabled. It intentionally has no replies: replies are
+// independently persisted by internal/incident and joined by ID on reads.
+type AutoIncident struct {
+	ID             string   `yaml:"id" json:"id"`
+	ProjectID      string   `yaml:"project_id" json:"projectId"`
+	Kind           string   `yaml:"kind" json:"kind"`
+	RelatedTaskIDs []string `yaml:"related_task_ids,omitempty" json:"relatedTaskIds,omitempty"`
+	Title          string   `yaml:"title" json:"title"`
+	Body           string   `yaml:"body,omitempty" json:"body,omitempty"`
+	Severity       string   `yaml:"severity" json:"severity"`
+	Status         string   `yaml:"status" json:"status"`
+	CreatedBy      string   `yaml:"created_by" json:"createdBy"`
+	CreatedAt      string   `yaml:"created_at" json:"createdAt"`
+	UpdatedAt      string   `yaml:"updated_at" json:"updatedAt"`
+	Origin         string   `yaml:"origin" json:"origin"`
+	RelatedAuditID string   `yaml:"related_audit_id" json:"relatedAuditId"`
+}
+
+// ChangeOptions is supplied by the Service orchestration layer. ProjectID is
+// required for an automatic Incident; NoTraceMode intentionally suppresses only
+// that Incident, never the identity audit.
+type ChangeOptions struct {
+	ProjectID   string
+	NoTraceMode bool
 }
 
 // Manager persists identities through Store.Write, sharing the same lock as task and
@@ -80,13 +135,35 @@ type ClaimInput struct {
 type Manager struct {
 	Store *store.Store
 	Now   func() time.Time
+	// ProjectID partitions canonical identity records/audits/automatic Incidents
+	// inside a shared cluster Store. The zero value is reserved for the old
+	// project-local/legacy manager returned by New.
+	ProjectID string
+	// LegacyProjection is deliberately true only for a legacy manager or an
+	// isolated Carbon standalone project. A shared cluster must never create a
+	// shared registry.yaml projection because it cannot represent per-project
+	// multi-role state safely.
+	LegacyProjection bool
 }
 
 func New(s *store.Store, now func() time.Time) *Manager {
 	if now == nil {
 		now = time.Now
 	}
-	return &Manager{Store: s, Now: now}
+	return &Manager{Store: s, Now: now, LegacyProjection: true}
+}
+
+// NewProject creates a manager whose canonical state is limited to one stable
+// Carbon project id. shared clusters must pass allowLegacyProjection=false;
+// standalone projects may import/project their old single-role registry once.
+func NewProject(s *store.Store, now func() time.Time, projectID string, allowLegacyProjection bool) (*Manager, error) {
+	if err := validateProjectID(projectID); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProjectRequired, err)
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return &Manager{Store: s, Now: now, ProjectID: projectID, LegacyProjection: allowLegacyProjection}, nil
 }
 
 func (m *Manager) now() time.Time {
@@ -99,11 +176,16 @@ func (m *Manager) now() time.Time {
 // List returns a defensive, actor-sorted snapshot. Missing registries are a normal
 // migration-free empty state for projects created before identity mode existed.
 func (m *Manager) List() ([]Record, error) {
-	registry, err := m.load()
+	value, err := m.loadState()
 	if err != nil {
 		return nil, err
 	}
-	return cloneRecords(registry.Records), nil
+	out := make([]Record, 0, len(value.Records))
+	for _, item := range value.Records {
+		out = append(out, recordFromCanonical(item))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Actor < out[j].Actor })
+	return out, nil
 }
 
 // Get returns one exact canonical actor record.
@@ -111,13 +193,13 @@ func (m *Manager) Get(actor string) (Record, error) {
 	if err := ValidateActor(actor); err != nil {
 		return Record{}, err
 	}
-	registry, err := m.load()
+	value, err := m.loadState()
 	if err != nil {
 		return Record{}, err
 	}
-	for _, record := range registry.Records {
+	for _, record := range value.Records {
 		if record.Actor == actor {
-			return cloneRecord(record), nil
+			return recordFromCanonical(record), nil
 		}
 	}
 	return Record{}, fmt.Errorf("%w: %s", ErrNotFound, actor)
@@ -129,13 +211,13 @@ func (m *Manager) GetTx(tx *store.WriteTx, actor string) (Record, error) {
 	if err := ValidateActor(actor); err != nil {
 		return Record{}, err
 	}
-	registry, err := m.loadTx(tx)
+	value, err := m.loadStateTx(tx)
 	if err != nil {
 		return Record{}, err
 	}
-	for _, record := range registry.Records {
+	for _, record := range value.Records {
 		if record.Actor == actor {
-			return cloneRecord(record), nil
+			return recordFromCanonical(record), nil
 		}
 	}
 	return Record{}, fmt.Errorf("%w: %s", ErrNotFound, actor)
@@ -145,55 +227,7 @@ func (m *Manager) GetTx(tx *store.WriteTx, actor string) (Record, error) {
 // claim may omit Reason; every material role/type change must carry a non-empty reason.
 // An exact idempotent retry returns the existing record without changing timestamps.
 func (m *Manager) ClaimOrChange(ctx context.Context, changedBy string, input ClaimInput) (Record, error) {
-	if m == nil || m.Store == nil {
-		return Record{}, errors.New("identity manager has no store")
-	}
-	if err := ValidateActor(changedBy); err != nil {
-		return Record{}, err
-	}
-	if err := validateClaimInput(input); err != nil {
-		return Record{}, err
-	}
-
-	var out Record
-	err := m.Store.Write(ctx, changedBy, "claim worker identity", func(tx *store.WriteTx) error {
-		registry, err := m.loadTx(tx)
-		if err != nil {
-			return err
-		}
-		at := m.now().Format(time.RFC3339Nano)
-		for index := range registry.Records {
-			current := registry.Records[index]
-			if current.Actor != input.Actor {
-				continue
-			}
-			if current.Role == input.Role && slices.Equal(current.Types, input.Types) {
-				out = cloneRecord(current)
-				return nil
-			}
-			if strings.TrimSpace(input.Reason) == "" {
-				return ErrChangeReasonRequired
-			}
-			current.Role = input.Role
-			current.Types = slices.Clone(input.Types)
-			current.UpdatedAt = at
-			current.ChangedBy = changedBy
-			current.Reason = input.Reason
-			registry.Records[index] = current
-			return m.writeTx(tx, registry, &out, current)
-		}
-
-		record := Record{
-			Actor: input.Actor, Role: input.Role, Types: slices.Clone(input.Types),
-			ClaimedAt: at, UpdatedAt: at, ChangedBy: changedBy, Reason: input.Reason,
-		}
-		registry.Records = append(registry.Records, record)
-		return m.writeTx(tx, registry, &out, record)
-	})
-	if err != nil {
-		return Record{}, err
-	}
-	return out, nil
+	return m.ClaimOrChangeWithOptions(ctx, changedBy, input, ChangeOptions{ProjectID: m.ProjectID, NoTraceMode: true})
 }
 
 func (m *Manager) writeTx(tx *store.WriteTx, registry Registry, out *Record, record Record) error {
@@ -314,7 +348,7 @@ func validateClaimInput(input ClaimInput) error {
 	if err := ValidateActor(input.Actor); err != nil {
 		return err
 	}
-	if err := ValidateRole(input.Role); err != nil {
+	if _, _, err := normalizeClaimRoles(input.Roles, input.Role); err != nil {
 		return err
 	}
 	if err := ValidateTypes(input.Types); err != nil {
@@ -415,6 +449,7 @@ func validateTimestamp(value string) error {
 }
 
 func cloneRecord(record Record) Record {
+	record.Roles = slices.Clone(record.Roles)
 	record.Types = slices.Clone(record.Types)
 	return record
 }

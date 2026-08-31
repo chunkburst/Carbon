@@ -137,6 +137,7 @@ func Capabilities(layer string) []string {
 		"leases", "trash", "search", "views", "templates", "bulk", "worker-stats",
 		"worker-registry", "worker-analytics", "work-logs", "task-blocker",
 		"task-evidence", "catalog-icons", "home-events", "types", "backup", "legacy-migration",
+		"event-subscriptions",
 	)
 }
 

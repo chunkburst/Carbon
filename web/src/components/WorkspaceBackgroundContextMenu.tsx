@@ -4,6 +4,8 @@ import {
   FilePlus2,
   KanbanSquare,
   ListChecks,
+  ClipboardCheck,
+  MessagesSquare,
   Network,
   RefreshCw,
   Search,
@@ -27,7 +29,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-export type WorkspaceContextView = "board" | "graph" | "workers" | "work-logs" | "owner-logs" | "trash";
+export type WorkspaceContextView = "board" | "graph" | "workers" | "work-logs" | "owner-logs" | "incidents" | "reviews" | "trash";
 
 type WorkspaceBackgroundContextMenuProps = {
   children: ReactNode;
@@ -50,6 +52,8 @@ const VIEW_ITEMS: Array<{
   { id: "graph", label: ["Dependency graph", "依赖图"], icon: Network },
   { id: "workers", label: ["Agent team", "智能体团队"], icon: UsersRound },
   { id: "work-logs", label: ["Work Logs", "工作日志"], icon: ListChecks },
+  { id: "incidents", label: ["Incidents", "事件"], icon: MessagesSquare },
+  { id: "reviews", label: ["Review center", "审核中心"], icon: ClipboardCheck },
   { id: "trash", label: ["Trash", "回收站"], icon: Trash2 },
 ];
 

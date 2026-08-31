@@ -25,6 +25,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Bot, CandlestickChart, CheckCircle2, ChevronRight, GitBranch, GripVertical, Inbox, LayoutGrid, List, Loader2, MoreHorizontal, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
 import { Assignee } from "@/components/Assignee";
+import { ActivityHealthBadge } from "@/components/ActivityHealthBadge";
 import { CarbonAnimationBoard } from "@/components/CarbonAnimationBoard";
 import { BoardBackgroundContextMenu } from "@/components/BoardBackgroundContextMenu";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
@@ -1089,6 +1090,7 @@ const CarbonTaskRow = memo(function CarbonTaskRow({
       ))}
       {task.labels && task.labels.length > 2 && <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">+{task.labels.length - 2}</span>}
       <TaskMetadata task={task} compact className="hidden shrink-0 2xl:flex" />
+      <ActivityHealthBadge task={task} thresholdSeconds={status.taskStagnationAfterSeconds} compact />
       <SessionStatus state={task.executionState} compact />
       {task.ready && task.status === status.initial && (
         <Tooltip>
@@ -1272,6 +1274,7 @@ const CarbonTaskCard = memo(function CarbonTaskCard({
             </DropdownMenuContent>
           </DropdownMenu>
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{task.id}</span>
+          <ActivityHealthBadge task={task} thresholdSeconds={status.taskStagnationAfterSeconds} compact />
           <SessionStatus state={task.executionState} compact />
           {onTrashTask && (
             <div className="shrink-0" onPointerDown={stop} onClick={stop}>

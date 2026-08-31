@@ -13,6 +13,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  ShieldCheck,
   Trash2,
   UserRoundX,
   UsersRound,
@@ -65,6 +66,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { WorkerContextMenu } from "@/components/WorkerContextMenu";
 import { WorkerIdentity } from "@/components/WorkerIdentity";
+import { WorkerIdentityManagerDialog } from "@/components/WorkerIdentityManagerDialog";
 import { priorityLabel } from "@/components/PriorityIcon";
 import { recentWorkTaskNavigationTarget, type TaskNavigationTarget } from "@/components/WorkLogTypes";
 import {
@@ -75,11 +77,12 @@ import {
   useWorkerAliases,
   useWorkerMetrics,
 } from "@/lib/queries";
-import type { CarbonHomeCluster, CarbonScopeInput, CarbonWorkerIdentity, CarbonWorkerMetric } from "@/lib/carbon-api";
+import type { CarbonHomeCluster, CarbonScope, CarbonScopeInput, CarbonWorkerIdentity, CarbonWorkerMetric } from "@/lib/carbon-api";
 import { useI18n } from "@/lib/i18n";
 import { carbonTaskTypeLabel } from "@/lib/task-labels";
 import { cn, labelTone, timeAgo } from "@/lib/utils";
 import { formatWorkerActor, type WorkerAliasMap } from "@/lib/worker-aliases";
+import { workerRoleLabel } from "@/lib/worker-roles";
 
 type Scope = "all" | "cluster" | "project";
 const EMPTY_ALIASES: WorkerAliasMap = {};
@@ -213,6 +216,8 @@ export function Workers({
   const [lifecycle, setLifecycle] = useState<{ actor: string; kind: "reset" | "delete"; stage: 1 | 2 } | null>(null);
   const [confirmationText, setConfirmationText] = useState("");
   const [lifecyclePending, setLifecyclePending] = useState(false);
+  const [identityManagerOpen, setIdentityManagerOpen] = useState(false);
+  const [identityEditorActor, setIdentityEditorActor] = useState<string>();
 
   const selectedCluster = useMemo(() => clusters.find((cluster) => cluster.id === clusterId), [clusterId, clusters]);
   const selectableProjects = useMemo(() => selectedCluster?.projects ?? [], [selectedCluster]);
@@ -249,14 +254,12 @@ export function Workers({
     if (!carbonBase) return carbonScope ?? path;
     return { home: resolvedHome, clusterId: effectiveClusterId || undefined, projectId: effectiveProjectId || undefined };
   }, [carbonBase, carbonScope, effectiveClusterId, effectiveProjectId, path, resolvedHome]);
-  const identityScope = useMemo<CarbonScopeInput>(() => {
-    if (!carbonBase) return carbonScope ?? path;
-    if (carbonBase.home && carbonBase.clusterId) return { home: carbonBase.home, clusterId: carbonBase.clusterId };
-    if (carbonBase.home && carbonBase.projectId) return { home: carbonBase.home, projectId: carbonBase.projectId };
-    return carbonBase;
-  }, [carbonBase, carbonScope, path]);
+  const identityScope = useMemo<CarbonScope | undefined>(() => {
+    if (!carbonBase?.home || effectiveScope !== "project" || !effectiveProjectId) return undefined;
+    return { home: carbonBase.home, clusterId: effectiveClusterId || undefined, projectId: effectiveProjectId };
+  }, [carbonBase, effectiveClusterId, effectiveProjectId, effectiveScope]);
   const metrics = useWorkerMetrics(metricScope, effectiveScope);
-  const identitiesQuery = useCarbonWorkerIdentities(identityScope, Boolean(identityScope));
+  const identitiesQuery = useCarbonWorkerIdentities(identityScope ?? "", Boolean(identityScope));
   const aliasesQuery = useWorkerAliases(resolvedHome);
   const patchAlias = usePatchWorkerAlias(resolvedHome);
   const resetWorker = useResetCarbonWorker(resolvedHome);
@@ -270,12 +273,7 @@ export function Workers({
   const identityPayload = identitiesQuery.data?.available ? identitiesQuery.data.data : undefined;
   const identityAvailable = identityPayload !== undefined;
   const identityModeEnabled = identityPayload?.modeEnabled === true;
-  const identities = useMemo(
-    () => identityPayload?.modeEnabled
-      ? identityPayload.records ?? []
-      : [],
-    [identityPayload],
-  );
+  const identities = useMemo(() => identityPayload?.records ?? [], [identityPayload]);
   const identitiesByActor = useMemo(() => new Map(identities.map((record) => [record.actor, record])), [identities]);
 
   const workers = useMemo(() => {
@@ -301,6 +299,7 @@ export function Workers({
       const searchable = [
         worker.actor,
         formatWorkerActor(worker.actor, aliases),
+        ...(identity?.roles ?? []),
         identity?.role,
         ...(identity?.types ?? []),
       ].filter(Boolean).join(" ").toLocaleLowerCase();
@@ -353,6 +352,10 @@ export function Workers({
     setConfirmationText("");
     setLifecycle({ actor, kind, stage: 1 });
   };
+  const openIdentityManager = (actor?: string) => {
+    setIdentityEditorActor(actor);
+    setIdentityManagerOpen(true);
+  };
   const finishLifecycle = async () => {
     if (!lifecycle || confirmationText !== lifecycle.actor) return;
     const action = lifecycle.kind === "reset" ? resolvedLifecycleActions?.onResetWorker : resolvedLifecycleActions?.onDeleteWorker;
@@ -387,10 +390,20 @@ export function Workers({
             <div className="flex items-center gap-2">
               <h1 className="text-sm font-semibold">{t("Agent team", "智能体团队")}</h1>
             </div>
-            <p className="truncate text-xs text-muted-foreground">{t("See who is moving work forward and what was delivered recently", "谁在推进任务、最近交付了什么，一眼就能看到")}</p>
+            <p className="truncate text-xs text-muted-foreground">{t("Check each Worker's current focus and recent contributions", "查看每位 Worker 当前在忙什么、最近完成了哪些工作")}</p>
           </div>
         </div>
         <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => openIdentityManager()}
+            aria-label={t("Manage identity and responsibilities", "管理身份与分工")}
+          >
+            <ShieldCheck data-icon="inline-start" />
+            {t("Identity and responsibilities", "身份与分工")}
+            {identityScope && identityAvailable && <Badge variant="secondary" className="ml-0.5 min-w-5 justify-center px-1.5 tabular-nums">{identities.length}</Badge>}
+          </Button>
           <InputGroup className="order-last min-w-44 flex-1 sm:order-none sm:w-64 sm:flex-none">
             <InputGroupAddon>
               <Search />
@@ -528,7 +541,9 @@ export function Workers({
                       aliasAvailable={canonicalLifecycleActor && aliasAvailable}
                       canReset={canonicalLifecycleActor && Boolean(resolvedLifecycleActions?.onResetWorker)}
                       canDelete={canonicalLifecycleActor && Boolean(resolvedLifecycleActions?.onDeleteWorker)}
+                      canEditIdentity={canonicalLifecycleActor && Boolean(identityScope)}
                       onEditAlias={() => openAliasEditor(worker.actor)}
+                      onEditIdentity={() => openIdentityManager(worker.actor)}
                       onReset={() => startLifecycle(worker.actor, "reset")}
                       onDelete={() => startLifecycle(worker.actor, "delete")}
                     />
@@ -600,6 +615,15 @@ export function Workers({
         onContinue={() => setLifecycle((current) => current ? { ...current, stage: 2 } : null)}
         onConfirm={() => void finishLifecycle()}
       />
+      <WorkerIdentityManagerDialog
+        open={identityManagerOpen}
+        onOpenChange={(open) => {
+          setIdentityManagerOpen(open);
+          if (!open) setIdentityEditorActor(undefined);
+        }}
+        scope={identityScope}
+        actor={identityEditorActor}
+      />
     </div>
   );
 }
@@ -638,7 +662,9 @@ type WorkerConsoleCardProps = {
   aliasAvailable: boolean;
   canReset: boolean;
   canDelete: boolean;
+  canEditIdentity: boolean;
   onEditAlias: () => void;
+  onEditIdentity: () => void;
   onReset: () => void;
   onDelete: () => void;
 };
@@ -658,7 +684,9 @@ function WorkerConsoleCard({
   aliasAvailable,
   canReset,
   canDelete,
+  canEditIdentity,
   onEditAlias,
+  onEditIdentity,
   onReset,
   onDelete,
 }: WorkerConsoleCardProps) {
@@ -687,6 +715,7 @@ function WorkerConsoleCard({
       pending={pending}
       onOpenWorker={onOpenWorker}
       onEditAlias={aliasAvailable ? onEditAlias : undefined}
+      onEditIdentity={canEditIdentity ? onEditIdentity : undefined}
       onReset={canReset ? onReset : undefined}
       onDelete={canDelete ? onDelete : undefined}
     >
@@ -711,12 +740,15 @@ function WorkerConsoleCard({
                 pending={pending}
                 canReset={canReset}
                 canDelete={canDelete}
+                canEditIdentity={canEditIdentity}
                 onEditAlias={onEditAlias}
+                onEditIdentity={onEditIdentity}
                 onReset={onReset}
                 onDelete={onDelete}
                 labels={{
                   actions: t("Agent actions", "智能体操作"),
                   alias: t("Edit display name", "编辑显示名称"),
+                  identity: t("Edit identity and responsibilities", "编辑身份与分工"),
                   reset: t("Restart work statistics", "重新统计工作数据"),
                   delete: t("Remove from team", "移出智能体团队"),
                 }}
@@ -775,10 +807,10 @@ function WorkerCapability({ identity, identityAvailable, identityModeEnabled }: 
   }
   if (!identityModeEnabled) {
     return (
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="outline">{t("Free collaboration", "自由协作")}</Badge>
-        <span className="text-xs text-muted-foreground">{t("This project has no fixed roles, so agents can take tasks as needed.", "这个项目没有固定身份分工，智能体可以按任务需要接手。")}</span>
-      </div>
+      <section className="flex flex-col gap-1.5" aria-label={t("Role and task types", "角色与可接任务")}>
+        <div className="flex flex-wrap items-center gap-1.5"><Badge variant="outline">{t("Free collaboration", "自由协作")}</Badge><span className="text-xs text-muted-foreground">{t("Roles are not enforced while this mode is off.", "当前不按身份限制任务认领。")}</span></div>
+        {identity && <div className="flex flex-wrap items-center gap-1.5">{(identity.roles?.length ? identity.roles : [identity.role]).map((role) => <Badge key={role} variant="secondary">{workerRoleLabel(role, t)}</Badge>)}{identity.types.map((type) => <Badge key={type} variant="outline">{carbonTaskTypeLabel(type, t)}</Badge>)}</div>}
+      </section>
     );
   }
   if (!identity) {
@@ -793,7 +825,7 @@ function WorkerCapability({ identity, identityAvailable, identityModeEnabled }: 
     <section className="flex flex-col gap-1.5" aria-label={t("Role and task types", "角色与可接任务")}>
       <span className="text-xs text-muted-foreground">{t("Role and task types", "角色与可接任务")}</span>
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="secondary">{identity.role}</Badge>
+        {(identity.roles?.length ? identity.roles : [identity.role]).map((role) => <Badge key={role} variant="secondary">{workerRoleLabel(role, t)}</Badge>)}
         {identity.types.map((type) => <Badge key={type} variant="outline">{carbonTaskTypeLabel(type, t)}</Badge>)}
       </div>
     </section>
@@ -902,7 +934,9 @@ function WorkerActions({
   pending,
   canReset,
   canDelete,
+  canEditIdentity,
   onEditAlias,
+  onEditIdentity,
   onReset,
   onDelete,
   labels,
@@ -913,13 +947,15 @@ function WorkerActions({
   pending: boolean;
   canReset: boolean;
   canDelete: boolean;
+  canEditIdentity: boolean;
   onEditAlias: () => void;
+  onEditIdentity: () => void;
   onReset: () => void;
   onDelete: () => void;
-  labels: { actions: string; alias: string; reset: string; delete: string };
+  labels: { actions: string; alias: string; identity: string; reset: string; delete: string };
 }) {
   const canManageLifecycle = canReset || canDelete;
-  if (!aliasAvailable && !canManageLifecycle) return null;
+  if (!aliasAvailable && !canEditIdentity && !canManageLifecycle) return null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -931,10 +967,11 @@ function WorkerActions({
         <DropdownMenuLabel className="truncate font-mono text-[10px]">{formatWorkerActor(actor, aliases)}</DropdownMenuLabel>
         <DropdownMenuGroup>
           {aliasAvailable && <DropdownMenuItem onSelect={onEditAlias}><Pencil />{labels.alias}</DropdownMenuItem>}
+          {canEditIdentity && <DropdownMenuItem onSelect={onEditIdentity}><ShieldCheck />{labels.identity}</DropdownMenuItem>}
         </DropdownMenuGroup>
         {canManageLifecycle && (
           <>
-            {aliasAvailable && <DropdownMenuSeparator />}
+            {(aliasAvailable || canEditIdentity) && <DropdownMenuSeparator />}
             <DropdownMenuGroup>
               {canReset && <DropdownMenuItem onSelect={onReset}><RotateCcw />{labels.reset}</DropdownMenuItem>}
               {canDelete && <DropdownMenuItem variant="destructive" onSelect={onDelete}><UserRoundX />{labels.delete}</DropdownMenuItem>}

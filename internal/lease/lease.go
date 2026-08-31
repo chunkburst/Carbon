@@ -42,11 +42,22 @@ type Manager struct {
 	// durable ownership primitive, while callers can enforce a task/actor policy
 	// inside the same Store.Write transaction before a new holder is recorded.
 	Authorize TaskAuthorizer
+	// BeforeClaimSave and AfterClaimSave are deliberately narrow transaction
+	// hooks for a successful new lease claim. They let a host persist a bounded
+	// prepared/committed delivery marker around the same task source mutation
+	// without turning lease into a general event bus. Renewals, heartbeats,
+	// pending approvals, releases, and reassignments do not invoke these hooks.
+	BeforeClaimSave ClaimSaveHook
+	AfterClaimSave  ClaimSaveHook
 }
 
 // TaskAuthorizer receives the current task while Manager already holds Store.Write.
 // It must not open a nested Store.Write transaction. Nil preserves legacy behavior.
 type TaskAuthorizer func(tx *store.WriteTx, current task.Task, actor string) error
+
+// ClaimSaveHook runs while Claim already holds Store.Write. It must not begin a
+// nested transaction.
+type ClaimSaveHook func(tx *store.WriteTx, doc *store.Doc) error
 
 func New(s *store.Store, now func() time.Time, defaultTTL time.Duration) *Manager {
 	if now == nil {
@@ -218,8 +229,18 @@ func (m *Manager) Claim(ctx context.Context, input ClaimInput) (ClaimResult, err
 		doc.SetLease(&lease)
 		doc.SetPendingClaims(removeActor(doc.Task.PendingClaims, input.Actor))
 		doc.AppendProvenance(input.Actor, "lease claimed", auditText("lease_id="+lease.ID, input.Reason), now)
+		if m.BeforeClaimSave != nil {
+			if err := m.BeforeClaimSave(tx, doc); err != nil {
+				return err
+			}
+		}
 		if err := tx.SaveTask(doc); err != nil {
 			return err
+		}
+		if m.AfterClaimSave != nil {
+			if err := m.AfterClaimSave(tx, doc); err != nil {
+				return err
+			}
 		}
 		out = ClaimResult{Doc: doc, Lease: cloneLease(&lease)}
 		return nil

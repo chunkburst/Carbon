@@ -5,9 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"carbon/internal/home"
 	"carbon/internal/mcp"
-	"carbon/internal/store"
 )
 
 func TestWorkerIdentityHTTPModeAndHumanManagement(t *testing.T) {
@@ -32,17 +30,9 @@ func TestWorkerIdentityHTTPModeAndHumanManagement(t *testing.T) {
 		t.Fatalf("disabled identity claim = %d %s, want 409", response.Code, response.Body.String())
 	}
 
-	dataRoot, err := home.ClusterDataRoot(fixture.homeRoot, fixture.cluster1.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := store.New(dataRoot).Config()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.IdentityMode = true
-	if err := store.New(dataRoot).SaveConfig(cfg); err != nil {
-		t.Fatal(err)
+	configPath := fixture.scopedPath("/api/config", fixture.cluster1, fixture.project1.ID)
+	if response := workLogHTTPCall(t, fixture.handler, http.MethodPost, configPath, `{"identityMode":true}`, "human:lead", nil); response.Code != http.StatusOK {
+		t.Fatalf("project identity policy enable = %d %s", response.Code, response.Body.String())
 	}
 	created := workLogHTTPCall(t, fixture.handler, http.MethodPut, selfPath,
 		`{"role":"架构师","types":["foundation","patch"]}`, "agent:owner", nil)
@@ -53,7 +43,7 @@ func TestWorkerIdentityHTTPModeAndHumanManagement(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &record); err != nil {
 		t.Fatal(err)
 	}
-	if !record.ModeEnabled || record.Record.Actor != "agent:owner" || record.Record.Role != "架构师" || len(record.Record.Types) != 2 || record.Record.ClaimedAt == "" {
+	if !record.ModeEnabled || record.Record.Actor != "agent:owner" || record.Record.Role != "architect" || len(record.Record.Types) != 2 || record.Record.ClaimedAt == "" {
 		t.Fatalf("agent identity response = %#v", record)
 	}
 

@@ -278,6 +278,8 @@ export type CarbonWorkerAliasesResponse = {
 // its single scalar `type` field for backwards compatibility.
 export type CarbonWorkerIdentity = {
   actor: string;
+  roles: string[];
+  /** Compatibility alias for older Carbon clients. New writes use roles. */
   role: string;
   types: string[];
   claimedAt: string;
@@ -297,10 +299,102 @@ export type CarbonWorkerIdentityMutationResponse = {
 };
 
 export type CarbonWorkerIdentityUpdate = {
-  role: string;
+  roles: string[];
   types: string[];
   reason?: string;
 };
+
+export type CarbonWorkerIdentityAudit = {
+  id: string;
+  actor: string;
+  operation: "claimed" | "changed";
+  beforeRoles?: string[];
+  beforeTypes?: string[];
+  afterRoles: string[];
+  afterTypes: string[];
+  changedBy: string;
+  reason?: string;
+  at: string;
+  relatedIncidentId?: string;
+};
+
+export type CarbonWorkerIdentityAuditResponse = {
+  modeEnabled: boolean;
+  audits: CarbonWorkerIdentityAudit[];
+};
+
+export type CarbonIncidentKind = "sudden" | "long_running" | "investigation" | "identity_change" | "other" | (string & {});
+export type CarbonIncidentSeverity = "info" | "low" | "normal" | "high" | "urgent";
+export type CarbonIncidentStatus = "open" | "investigating" | "resolved" | "closed";
+export type CarbonIncidentOrigin = "manual" | "identity_change";
+
+export type CarbonIncidentReply = {
+  id: string;
+  incidentId: string;
+  author: string;
+  body: string;
+  createdAt: string;
+};
+
+export type CarbonIncident = {
+  id: string;
+  projectId: string;
+  kind: CarbonIncidentKind;
+  relatedTaskIds?: string[];
+  title: string;
+  body?: string;
+  severity: CarbonIncidentSeverity;
+  status: CarbonIncidentStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  origin: CarbonIncidentOrigin;
+  relatedAuditId?: string;
+  replies?: CarbonIncidentReply[];
+};
+
+export type CarbonIncidentCreate = {
+  kind: CarbonIncidentKind;
+  relatedTaskIds?: string[];
+  title: string;
+  body?: string;
+  severity: CarbonIncidentSeverity;
+};
+
+export type CarbonReviewTargetKind = "plan" | "manual_check";
+export type CarbonReviewStatus = "pending" | "approved" | "rejected";
+
+export type CarbonReviewTarget = {
+  id: string;
+  projectId: string;
+  targetKind: CarbonReviewTargetKind;
+  targetId: string;
+  taskId: string;
+  checkId?: string;
+  reviewerActor: string;
+  status: CarbonReviewStatus;
+  decision?: string;
+  createdBy: string;
+  createdAt: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+};
+
+export type CarbonReviewCreate =
+  | {
+      targetKind: "plan";
+      targetId: string;
+      taskId: string;
+      checkId?: never;
+      reviewerActor: string;
+    }
+  | {
+      targetKind: "manual_check";
+      targetId: string;
+      taskId: string;
+      checkId: string;
+      reviewerActor: string;
+    };
 
 export type CarbonWorkLogVisibility = "worker_private" | "project_public" | "global_public";
 
@@ -533,12 +627,16 @@ export type CarbonConfig = {
   scope?: { home?: string; clusterId?: string; projectId?: string };
   checkShell?: string;
   trashRetentionDays: number;
+  taskStagnationAfterSeconds: number;
   identityMode: boolean;
+  noTraceMode: boolean;
 };
 
 export type CarbonConfigUpdate = {
   trashRetentionDays?: number;
+  taskStagnationAfterSeconds?: number;
   identityMode?: boolean;
+  noTraceMode?: boolean;
 };
 
 export type CarbonBackupSnapshot = {
@@ -1222,11 +1320,41 @@ export const saveCarbonConfig = (scope: CarbonScopeInput, input: CarbonConfigUpd
 export const listCarbonWorkerIdentities = (scope: CarbonScopeInput) =>
   optional<CarbonWorkerIdentityListResponse>("GET", scopedURL("/api/worker-identities", scope));
 
+export const listCarbonWorkerIdentityAudit = (scope: CarbonScopeInput) =>
+  optional<CarbonWorkerIdentityAuditResponse>("GET", scopedURL("/api/worker-identities/audit", scope));
+
 export const updateCarbonWorkerIdentity = (
   scope: CarbonScopeInput,
   actor: string,
   input: CarbonWorkerIdentityUpdate,
 ) => optional<CarbonWorkerIdentityMutationResponse>("PUT", scopedURL(`/api/worker-identities/${enc(actor)}`, scope), input);
+
+export const listCarbonIncidents = (scope: CarbonScopeInput) =>
+  optional<{ incidents: CarbonIncident[] }>("GET", scopedURL("/api/incidents", scope));
+
+export const getCarbonIncident = (scope: CarbonScopeInput, id: string) =>
+  optional<CarbonIncident>("GET", scopedURL(`/api/incidents/${enc(id)}`, scope));
+
+export const createCarbonIncident = (scope: CarbonScopeInput, input: CarbonIncidentCreate) =>
+  optional<CarbonIncident>("POST", scopedURL("/api/incidents", scope), input);
+
+export const updateCarbonIncident = (scope: CarbonScopeInput, id: string, status: CarbonIncidentStatus) =>
+  optional<CarbonIncident>("PATCH", scopedURL(`/api/incidents/${enc(id)}`, scope), { status });
+
+export const replyCarbonIncident = (scope: CarbonScopeInput, id: string, body: string) =>
+  optional<CarbonIncidentReply>("POST", scopedURL(`/api/incidents/${enc(id)}/reply`, scope), { body });
+
+export const listCarbonReviews = (scope: CarbonScopeInput) =>
+  optional<{ reviews: CarbonReviewTarget[] }>("GET", scopedURL("/api/reviews", scope));
+
+export const getCarbonReview = (scope: CarbonScopeInput, id: string) =>
+  optional<CarbonReviewTarget>("GET", scopedURL(`/api/reviews/${enc(id)}`, scope));
+
+export const createCarbonReview = (scope: CarbonScopeInput, input: CarbonReviewCreate) =>
+  optional<CarbonReviewTarget>("POST", scopedURL("/api/reviews", scope), input);
+
+export const decideCarbonReview = (scope: CarbonScopeInput, id: string, status: Exclude<CarbonReviewStatus, "pending">, decision: string) =>
+  optional<CarbonReviewTarget>("POST", scopedURL(`/api/reviews/${enc(id)}/decide`, scope), { status, decision });
 
 // --- Carbon-scoped MCP connection -------------------------------------------------
 

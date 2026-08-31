@@ -44,7 +44,7 @@ func TestClaimOrChangePersistsAndRequiresReasonForMaterialChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changed.ClaimedAt != first.ClaimedAt || changed.Role != "任务发布者" || changed.ChangedBy != "human:lead" || changed.Reason != "调整负责范围" {
+	if changed.ClaimedAt != first.ClaimedAt || changed.Role != "task_publisher" || changed.ChangedBy != "human:lead" || changed.Reason != "调整负责范围" {
 		t.Fatalf("changed identity = %#v", changed)
 	}
 	got, err := manager.Get("agent:architect")
@@ -108,7 +108,7 @@ func TestClaimOrChangeSerializesConcurrentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 1 || records[0].Actor != "agent:worker" || (records[0].Role != "前端" && records[0].Role != "后端") {
+	if len(records) != 1 || records[0].Actor != "agent:worker" || (records[0].Role != "frontend" && records[0].Role != "backend") {
 		t.Fatalf("concurrent registry = %#v", records)
 	}
 }

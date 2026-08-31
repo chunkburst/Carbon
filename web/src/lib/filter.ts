@@ -11,7 +11,7 @@ export const FILTER_LABEL: Record<Filter, string> = {
     return translate("Active", "进行中");
   },
   get stalled() {
-    return translate("Stalled", "已停滞");
+    return translate("Stagnant", "停滞");
   },
   get review() {
     return translate("Awaiting review", "等待审核");
@@ -31,7 +31,7 @@ export function matches(t: Task, filter: Filter, status: Status): boolean {
     case "active":
       return !(status.closed ?? []).includes(t.status) && t.status !== status.initial;
     case "stalled":
-      return t.executionState === "stalled";
+      return t.activityHealth === "stagnant";
     case "review":
       return t.executionState === "awaiting_review";
     case "backlog":

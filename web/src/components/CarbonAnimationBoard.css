@@ -516,6 +516,7 @@
 .carbon-market-status-strip i[data-state="active"] { background: var(--brand); }
 .carbon-market-status-strip i[data-state="completed"] { background: var(--success); }
 .carbon-market-status-strip i[data-state="blocked"] { background: var(--destructive); }
+.carbon-market-status-strip i[data-state="stagnant"] { background: var(--warning); }
 .carbon-market-status-strip i[data-state="queued"] { background: var(--warning); }
 
 .carbon-market-driver-strip {
@@ -535,7 +536,8 @@
 .carbon-market-driver-strip[data-event="processing"] { --market-event: var(--brand); }
 .carbon-market-driver-strip[data-event="completed"],
 .carbon-market-driver-strip[data-event="recovered"] { --market-event: var(--success); }
-.carbon-market-driver-strip[data-event="blocked"] { --market-event: var(--destructive); }
+.carbon-market-driver-strip[data-event="blocked"],
+.carbon-market-driver-strip[data-event="stagnant"] { --market-event: var(--destructive); }
 
 .carbon-market-driver {
   display: grid;
@@ -748,6 +750,36 @@ button.carbon-market-driver:focus-visible {
   inset: 0;
 }
 
+.carbon-market-empty-tape {
+  position: absolute;
+  z-index: 2;
+  inset: 18% 10%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.45rem;
+  color: var(--muted-foreground);
+  text-align: center;
+  pointer-events: none;
+}
+
+.carbon-market-empty-tape > svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--brand);
+}
+
+.carbon-market-empty-tape > strong {
+  color: var(--foreground);
+  font-size: 0.82rem;
+}
+
+.carbon-market-empty-tape > span {
+  max-width: 30rem;
+  font-size: 0.7rem;
+  line-height: 1.55;
+}
+
 .carbon-market-readout {
   position: absolute;
   z-index: 1;
@@ -823,7 +855,8 @@ button.carbon-market-event-chip[data-event="claimed"],
 button.carbon-market-event-chip[data-event="processing"] { --market-chip-event: var(--brand); }
 button.carbon-market-event-chip[data-event="completed"],
 button.carbon-market-event-chip[data-event="recovered"] { --market-chip-event: var(--success); }
-button.carbon-market-event-chip[data-event="blocked"] { --market-chip-event: var(--destructive); }
+button.carbon-market-event-chip[data-event="blocked"],
+button.carbon-market-event-chip[data-event="stagnant"] { --market-chip-event: var(--destructive); }
 
 button.carbon-market-event-chip:hover,
 button.carbon-market-event-chip:focus-visible {
@@ -998,7 +1031,8 @@ button.carbon-market-event-chip:focus-visible {
 .carbon-market-marker-dot[data-event="processing"] { background: var(--brand); }
 .carbon-market-marker-dot[data-event="completed"],
 .carbon-market-marker-dot[data-event="recovered"] { background: var(--success); }
-.carbon-market-marker-dot[data-event="blocked"] { background: var(--destructive); }
+.carbon-market-marker-dot[data-event="blocked"],
+.carbon-market-marker-dot[data-event="stagnant"] { background: var(--destructive); }
 
 .carbon-market-event-meta {
   min-width: 0;

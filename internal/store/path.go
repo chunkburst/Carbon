@@ -42,12 +42,6 @@ func (s *Store) storeRoot() (string, error) {
 	// EnsureCarbonStore is idempotent and returns immediately for an already canonical
 	// tree, while old-only state is copied and verified before any Store path is used.
 	if err := repopkg.EnsureCarbonStore(root); err != nil {
-		// The repository migration layer exposes its own sentinel so it can be used
-		// without importing Store. Translate an escaping canonical directory into the
-		// Store-facing error expected by every managed path operation.
-		if errors.Is(err, repopkg.ErrCarbonPathOutsideRoot) {
-			return "", fmt.Errorf("%w: %v", ErrPathOutsideRoot, err)
-		}
 		return "", err
 	}
 	return filepath.Clean(root), nil

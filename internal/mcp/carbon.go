@@ -12,6 +12,7 @@ import (
 	"carbon/internal/search"
 	"carbon/internal/stats"
 	"carbon/internal/store"
+	"carbon/internal/subscription"
 	"carbon/internal/task"
 	"carbon/internal/templates"
 	"carbon/internal/trash"
@@ -213,7 +214,45 @@ func (svc *Service) BulkUpdate(ctx context.Context, update store.BulkUpdate) ([]
 			return nil, err
 		}
 	}
-	return svc.store.BulkUpdate(ctx, svc.actor, update)
+	manager, projectID, enabled, err := svc.optionalEventSubscriptionManager()
+	if err != nil {
+		return nil, err
+	}
+	// Cross-project moves have a distinct move audit contract; they are not part
+	// of this first project-local task event slice because the task no longer has
+	// one unambiguous ledger owner after the source write.
+	if !enabled || (update.ProjectID != nil && *update.ProjectID != projectID) {
+		return svc.store.BulkUpdate(ctx, svc.actor, update)
+	}
+	var changed []*store.Doc
+	err = svc.store.Write(ctx, svc.actor, "bulk update tasks with event ledger", func(tx *store.WriteTx) error {
+		prepared := make([]*subscription.PreparedEvent, 0, len(update.IDs))
+		var updateErr error
+		changed, updateErr = tx.BulkUpdateWithBeforeSave(svc.actor, update, svc.now(), func(docs []*store.Doc) error {
+			kind := "updated"
+			if update.Status != nil {
+				kind = "status_changed"
+			}
+			for _, doc := range docs {
+				item, err := svc.prepareTaskEventTx(tx, manager, projectID, doc, kind)
+				if err != nil {
+					return err
+				}
+				prepared = append(prepared, item)
+			}
+			return nil
+		})
+		if updateErr != nil {
+			return updateErr
+		}
+		for _, item := range prepared {
+			if err := commitPreparedTaskEventTx(tx, manager, item); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return changed, err
 }
 
 func (svc *Service) BulkMove(ctx context.Context, move store.BulkMove) ([]*store.Doc, error) {

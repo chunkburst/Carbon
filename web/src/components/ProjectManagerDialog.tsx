@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -37,6 +37,7 @@ import {
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import {
   CatalogIcon,
@@ -75,6 +76,43 @@ function matchesSearch(value: string | undefined, query: string): boolean {
   return value?.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) ?? false;
 }
 
+function scrollProjectDialogContent(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.currentTarget !== event.target) return;
+  const viewport = event.currentTarget.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+  if (!viewport || viewport.scrollHeight <= viewport.clientHeight) return;
+
+  const pageSize = Math.max(viewport.clientHeight * 0.9, 160);
+  let top: number;
+  switch (event.key) {
+    case "ArrowDown":
+      top = viewport.scrollTop + 48;
+      break;
+    case "ArrowUp":
+      top = viewport.scrollTop - 48;
+      break;
+    case "PageDown":
+      top = viewport.scrollTop + pageSize;
+      break;
+    case "PageUp":
+      top = viewport.scrollTop - pageSize;
+      break;
+    case " ":
+      top = viewport.scrollTop + (event.shiftKey ? -pageSize : pageSize);
+      break;
+    case "Home":
+      top = 0;
+      break;
+    case "End":
+      top = viewport.scrollHeight;
+      break;
+    default:
+      return;
+  }
+
+  event.preventDefault();
+  viewport.scrollTo({ top, behavior: "auto" });
+}
+
 type ManagerProps = {
   home: string;
   clusters: CarbonHomeCluster[];
@@ -98,11 +136,19 @@ export function ProjectManagerDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(42rem,86vh)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
-        <DialogHeader className="border-b px-5 py-4 pr-14">
+        <DialogHeader className="shrink-0 border-b px-5 py-4 pr-14">
           <DialogTitle>{t("Projects", "项目")}</DialogTitle>
           <DialogDescription>{t("Open a task board or organize the projects in this Carbon Home.", "打开任务看板，或整理此 Carbon 主目录中的项目。")}</DialogDescription>
         </DialogHeader>
-        <ProjectManagerContent {...props} compact onOpenManagementPage={onOpenManagementPage} />
+        <ScrollArea
+          aria-label={t("Project catalog", "项目目录")}
+          className="min-h-0 flex-1"
+          role="region"
+          tabIndex={0}
+          onKeyDown={scrollProjectDialogContent}
+        >
+          <ProjectManagerContent {...props} compact onOpenManagementPage={onOpenManagementPage} />
+        </ScrollArea>
       </DialogContent>
     </Dialog>
   );

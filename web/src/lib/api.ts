@@ -44,6 +44,10 @@ export type Provenance = {
 
 export type ExecutionState = "active" | "stalled" | "awaiting_review";
 
+// Activity health is derived from meaningful task activity and deliberately does
+// not replace the workflow status or the live session state.
+export type ActivityHealth = "fresh" | "stagnant" | "unknown";
+
 export type SessionLive = {
   session: string;
   heartbeatAt: string;
@@ -139,6 +143,9 @@ export type Task = {
   activeAttempt?: string;
   executionState?: ExecutionState;
   sessionId?: string;
+  activityHealth?: ActivityHealth;
+  lastMeaningfulAt?: string;
+  stagnantAt?: string;
   // Carbon stable v2 is additive. These remain optional while an older local sidecar is
   // in use, allowing the rest of the task UI to keep working unchanged.
   projectId?: string;
@@ -178,6 +185,7 @@ export type Status = {
   requestedCompatLayer?: string;
   stableCompatLayer?: string;
   carbonVersion?: string;
+  taskStagnationAfterSeconds?: number;
   capabilities?: string[];
   scope?: {
     mode?: string;
@@ -203,6 +211,7 @@ export type ClusterProject = {
   tasks: number;
   active: number;
   stalled: number;
+  stagnant?: number;
   review: number;
   liveAgents: number;
 };
@@ -242,6 +251,9 @@ type WireTask = Omit<Task, "lease" | "pendingClaims" | "evidence"> & {
   conflict_info?: CarbonConflict;
   pendingClaims?: WirePendingClaim[];
   pending_claims?: WirePendingClaim[];
+  activity_health?: ActivityHealth;
+  last_meaningful_at?: string;
+  stagnant_at?: string;
 };
 
 // Carbon's persisted frontmatter uses `project_id`; the legacy HTTP DTO uses
@@ -283,6 +295,9 @@ export function normalizeTask(raw: WireTask): Task {
     lease: normalizeLease(raw.lease ?? raw.lease_info),
     conflict: raw.conflict ?? raw.conflict_info,
     pendingClaims: normalizePendingClaims(raw.pendingClaims ?? raw.pending_claims),
+    activityHealth: raw.activityHealth ?? raw.activity_health,
+    lastMeaningfulAt: raw.lastMeaningfulAt ?? raw.last_meaningful_at,
+    stagnantAt: raw.stagnantAt ?? raw.stagnant_at,
   };
 }
 

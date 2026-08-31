@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { ClipboardCopy, ExternalLink, Pencil, RotateCcw, Text, UserRoundX } from "lucide-react";
+import { ClipboardCopy, ExternalLink, Pencil, RotateCcw, ShieldCheck, Text, UserRoundX } from "lucide-react";
 import { toast } from "sonner";
 import {
   ContextMenu,
@@ -20,6 +20,7 @@ type WorkerContextMenuProps = {
   pending?: boolean;
   onOpenWorker?: (actor: string) => void;
   onEditAlias?: () => void;
+  onEditIdentity?: () => void;
   onReset?: () => void;
   onDelete?: () => void;
 };
@@ -53,6 +54,7 @@ export function WorkerContextMenu({
   pending = false,
   onOpenWorker,
   onEditAlias,
+  onEditIdentity,
   onReset,
   onDelete,
 }: WorkerContextMenuProps) {
@@ -65,7 +67,7 @@ export function WorkerContextMenu({
       toast.error(t("Could not copy to the clipboard", "无法复制到剪贴板"));
     }
   };
-  const hasManagementActions = Boolean(onEditAlias || onReset || onDelete);
+  const hasManagementActions = Boolean(onEditAlias || onEditIdentity || onReset || onDelete);
 
   return (
     <ContextMenu>
@@ -93,6 +95,7 @@ export function WorkerContextMenu({
         {hasManagementActions && (
           <ContextMenuGroup>
             {onEditAlias && <ContextMenuItem disabled={pending} onSelect={onEditAlias}><Pencil />{t("Edit display name", "编辑显示名称")}</ContextMenuItem>}
+            {onEditIdentity && <ContextMenuItem disabled={pending} onSelect={onEditIdentity}><ShieldCheck />{t("Edit identity and responsibilities", "编辑身份与分工")}</ContextMenuItem>}
             {onReset && <ContextMenuItem disabled={pending} onSelect={onReset}><RotateCcw />{t("Restart work statistics", "重新统计工作数据")}</ContextMenuItem>}
             {onDelete && <ContextMenuItem variant="destructive" disabled={pending} onSelect={onDelete}><UserRoundX />{t("Remove from team", "移出智能体团队")}</ContextMenuItem>}
           </ContextMenuGroup>

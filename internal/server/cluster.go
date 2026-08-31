@@ -34,8 +34,11 @@ type clusterProjectDTO struct {
 	Tasks       int    `json:"tasks"`
 	Active      int    `json:"active"`
 	Stalled     int    `json:"stalled"`
-	Review      int    `json:"review"`
-	LiveAgents  int    `json:"liveAgents"`
+	// Stagnant is a task-level inactivity count. It is intentionally distinct
+	// from Stalled, which remains the active-session heartbeat-loss count.
+	Stagnant   int `json:"stagnant"`
+	Review     int `json:"review"`
+	LiveAgents int `json:"liveAgents"`
 }
 
 type clusterReq struct {
@@ -161,7 +164,7 @@ func (s *Server) clusterResponse(root string, manifest cluster.Manifest) cluster
 		view.Initialized = initialized
 		view.Prefix = prefix
 		if initialized {
-			view.Tasks, view.Active, view.Stalled, view.Review, view.LiveAgents = s.projectSummary(projectRoot)
+			view.Tasks, view.Active, view.Stalled, view.Stagnant, view.Review, view.LiveAgents = s.projectSummary(projectRoot)
 		}
 		resp.Projects = append(resp.Projects, view)
 	}
@@ -181,18 +184,21 @@ func projectWorkspace(root string) (bool, string) {
 // projectSummary always reads one project root at a time. In particular, its local service
 // and actor set are never keyed by task id alone, so duplicate task ids in distinct projects
 // cannot be merged into the same aggregate.
-func (s *Server) projectSummary(root string) (tasks, active, stalled, review, liveAgents int) {
+func (s *Server) projectSummary(root string) (tasks, active, stalled, stagnant, review, liveAgents int) {
 	cfg, err := store.New(root).Config()
 	if err != nil {
-		return 0, 0, 0, 0, 0
+		return 0, 0, 0, 0, 0, 0
 	}
 	views, err := s.service(root, s.actor).ListWithExecution("", "", nil, "")
 	if err != nil {
-		return 0, 0, 0, 0, 0
+		return 0, 0, 0, 0, 0, 0
 	}
 	activeActors := make(map[string]struct{})
 	for _, view := range views {
 		tasks++
+		if view.Health == mcp.ActivityHealthStagnant {
+			stagnant++
+		}
 		switch view.ExecutionState {
 		case mcp.ExecutionActive:
 			active++
@@ -214,7 +220,7 @@ func (s *Server) projectSummary(root string) (tasks, active, stalled, review, li
 			}
 		}
 	}
-	return tasks, active, stalled, review, len(activeActors)
+	return tasks, active, stalled, stagnant, review, len(activeActors)
 }
 
 func writeClusterErr(w http.ResponseWriter, err error) {

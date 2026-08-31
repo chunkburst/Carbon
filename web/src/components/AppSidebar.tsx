@@ -96,14 +96,14 @@ export function AppSidebar({
   ];
   const sessionNav: { key: Filter; label: string; icon: typeof ListTodo }[] = [
     { key: "active", label: t("Active", "进行中"), icon: Activity },
-    { key: "stalled", label: t("Stalled", "已停滞"), icon: ClockAlert },
+    { key: "stalled", label: t("Stagnant", "停滞"), icon: ClockAlert },
     { key: "review", label: t("Awaiting review", "等待审核"), icon: ScanEye },
   ];
   const folderName = currentProject?.name || workspaceBasename(status.root);
   const clusterName = cluster?.name || t("Project cluster", "项目集群");
   const counts: Partial<Record<Filter, number>> = {
     active: tasks?.filter((task) => task.executionState === "active").length,
-    stalled: tasks?.filter((task) => task.executionState === "stalled").length,
+    stalled: tasks?.filter((task) => task.activityHealth === "stagnant").length,
     review: tasks?.filter((task) => task.executionState === "awaiting_review").length,
   };
 
@@ -320,8 +320,11 @@ function ProjectMenuItem({
       ? { label: t("Not initialized", "未初始化"), variant: "outline" as const }
       : null,
     project.active ? { label: `${project.active} ${t("active", "进行中")}`, variant: "secondary" as const } : null,
+    project.stagnant
+      ? { label: `${project.stagnant} ${t("stagnant", "停滞")}`, variant: "destructive" as const }
+      : null,
     project.stalled
-      ? { label: `${project.stalled} ${t("stalled", "停滞")}`, variant: "destructive" as const }
+      ? { label: `${project.stalled} ${t("unresponsive sessions", "会话无响应")}`, variant: "outline" as const }
       : null,
     project.review ? { label: `${project.review} ${t("review", "待审核")}`, variant: "secondary" as const } : null,
     project.liveAgents

@@ -86,10 +86,17 @@ func (s *Store) BulkUpdate(ctx context.Context, actor string, update BulkUpdate)
 	var changed []*Doc
 	err := s.Write(ctx, actor, "bulk update tasks", func(tx *WriteTx) error {
 		var err error
-		changed, err = tx.bulkUpdate(actor, update, time.Now())
+		changed, err = tx.BulkUpdateWithBeforeSave(actor, update, time.Now(), nil)
 		return err
 	})
 	return changed, err
+}
+
+// BulkUpdateWithBeforeSave is the short transaction counterpart used by the
+// stable project event ledger. beforeSave runs after every candidate has its
+// final provenance appended and before any task file is persisted.
+func (tx *WriteTx) BulkUpdateWithBeforeSave(actor string, update BulkUpdate, at time.Time, beforeSave func([]*Doc) error) ([]*Doc, error) {
+	return tx.bulkUpdateWithBeforeSave(actor, update, at, beforeSave)
 }
 
 // BulkMove coordinates task moves to a target project and optionally reparents them.
@@ -117,6 +124,10 @@ func (s *Store) BulkMove(ctx context.Context, actor string, move BulkMove) ([]*D
 }
 
 func (tx *WriteTx) bulkUpdate(actor string, update BulkUpdate, at time.Time) ([]*Doc, error) {
+	return tx.bulkUpdateWithBeforeSave(actor, update, at, nil)
+}
+
+func (tx *WriteTx) bulkUpdateWithBeforeSave(actor string, update BulkUpdate, at time.Time, beforeSave func([]*Doc) error) ([]*Doc, error) {
 	ids, err := normalizeIDs(update.IDs)
 	if err != nil {
 		return nil, err
@@ -239,6 +250,11 @@ func (tx *WriteTx) bulkUpdate(actor string, update BulkUpdate, at time.Time) ([]
 			d.AppendProvenance(actor, "bulk transitioned to "+*update.Status, details, at)
 		} else if !hasDedicatedAudit(d, update) {
 			d.AppendProvenance(actor, "bulk updated", details, at)
+		}
+	}
+	if beforeSave != nil {
+		if err := beforeSave(docs); err != nil {
+			return nil, err
 		}
 	}
 	if err := tx.saveMany(docs); err != nil {

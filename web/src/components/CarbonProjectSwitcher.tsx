@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Check, ChevronsUpDown, ClipboardCopy, ExternalLink, FolderKanban, Pencil, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ProjectDeleteDialog, ProjectEditorDialog } from "@/components/ProjectManagerDialog";
@@ -69,15 +70,19 @@ export function CarbonProjectSwitcher({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<{ project: CarbonHomeProject; clusterId?: string } | null>(null);
   const openFrame = useRef<number | undefined>(undefined);
+  const selectFrame = useRef<number | undefined>(undefined);
+  const selectTimer = useRef<number | undefined>(undefined);
   const deleteProject = useDeleteHomeProject(home);
   const fullName = cluster ? `${cluster.name} / ${project.name}` : project.name;
   const selectedIcon = catalogIconFor(presentation, "project", project.id);
 
   useEffect(() => () => {
     if (openFrame.current !== undefined) window.cancelAnimationFrame(openFrame.current);
+    if (selectFrame.current !== undefined) window.cancelAnimationFrame(selectFrame.current);
+    if (selectTimer.current !== undefined) window.clearTimeout(selectTimer.current);
   }, []);
 
-  const setPopoverOpen = useCallback((nextOpen: boolean) => {
+  const setPopoverOpen = (nextOpen: boolean) => {
     if (!nextOpen) {
       if (openFrame.current !== undefined) {
         window.cancelAnimationFrame(openFrame.current);
@@ -98,32 +103,49 @@ export function CarbonProjectSwitcher({
       return;
     }
     setOpen(true);
-  }, [catalogUpdatePending, onApplyCatalogUpdate]);
+  };
 
   const selectProject = (clusterId: string | undefined, projectId: string) => {
-    onSelectProject(clusterId, projectId);
-    setOpen(false);
+    // Close first, then change the scoped data on the next frame. This prevents
+    // React's event batching from keeping the old list visible while Home applies
+    // catalog updates or starts the next project's queries.
+    // Commit the portal close synchronously. The route change below can start a
+    // relatively expensive scoped workspace render, so leaving this update in
+    // React's event batch makes the picker look frozen until that render finishes.
+    flushSync(() => setPopoverOpen(false));
+    if (selectFrame.current !== undefined) window.cancelAnimationFrame(selectFrame.current);
+    if (selectTimer.current !== undefined) window.clearTimeout(selectTimer.current);
+    selectFrame.current = window.requestAnimationFrame(() => {
+      selectFrame.current = undefined;
+      // Queue navigation after the closed picker has reached a paint boundary.
+      // requestAnimationFrame itself runs before paint, so the following task is
+      // intentional rather than calling onSelectProject directly in this frame.
+      selectTimer.current = window.setTimeout(() => {
+        selectTimer.current = undefined;
+        onSelectProject(clusterId, projectId);
+      }, 0);
+    });
   };
-  const beginProjectEdit = useCallback((target: CarbonHomeProject, clusterId?: string) => {
+  const beginProjectEdit = (target: CarbonHomeProject, clusterId?: string) => {
     setOpen(false);
     setEditorTarget({ project: target, clusterId });
-  }, []);
-  const beginProjectDelete = useCallback((target: CarbonHomeProject, clusterId?: string) => {
+  };
+  const beginProjectDelete = (target: CarbonHomeProject, clusterId?: string) => {
     setDeleteTarget({ project: target, clusterId });
     setDeleteStage(1);
     setDeleteConfirmationName("");
     setDeleteData(false);
     setDeleteError(null);
-  }, []);
-  const closeProjectDelete = useCallback(() => {
+  };
+  const closeProjectDelete = () => {
     if (deleteProject.isPending) return;
     setDeleteTarget(null);
     setDeleteStage(null);
     setDeleteConfirmationName("");
     setDeleteData(false);
     setDeleteError(null);
-  }, [deleteProject.isPending]);
-  const confirmProjectDelete = useCallback(async () => {
+  };
+  const confirmProjectDelete = async () => {
     if (!deleteTarget || deleteConfirmationName !== deleteTarget.project.name || deleteProject.isPending) return;
     setDeleteError(null);
     try {
@@ -148,7 +170,7 @@ export function CarbonProjectSwitcher({
     } catch (cause) {
       setDeleteError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [deleteConfirmationName, deleteData, deleteProject, deleteTarget, t]);
+  };
 
   return (
     <Popover open={open} onOpenChange={setPopoverOpen}>
@@ -184,7 +206,7 @@ export function CarbonProjectSwitcher({
 
       <PopoverContent
         align="start"
-        className="w-[min(32rem,calc(100vw-1rem))] gap-0 overflow-hidden rounded-2xl p-0"
+        className="w-[min(32rem,calc(100vw-1rem))] gap-0 overflow-hidden rounded-2xl p-0 data-closed:hidden"
       >
         <Command>
           <CommandInput placeholder={t("Search projects or clusters…", "搜索项目或集群…")} />

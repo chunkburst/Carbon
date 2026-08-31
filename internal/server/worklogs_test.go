@@ -11,6 +11,7 @@ import (
 
 	"carbon/internal/home"
 	"carbon/internal/mcp"
+	"carbon/internal/projectpolicy"
 	"carbon/internal/store"
 	"carbon/internal/worklog"
 )
@@ -129,12 +130,7 @@ func TestWorkLogHTTPIdentityDraftEnvelopeDoesNotTrustHistoricalTag(t *testing.T)
 		t.Fatal(err)
 	}
 	data := store.New(dataRoot)
-	cfg, err := data.Config()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.IdentityMode = true
-	if err := data.SaveConfig(cfg); err != nil {
+	if _, err := projectpolicy.New(data).Save(context.Background(), "human:lead", projectpolicy.Policy{Version: 1, ProjectID: fixture.project1.ID, IdentityMode: true}); err != nil {
 		t.Fatal(err)
 	}
 	legacy, err := worklog.New(data, nil).Create(context.Background(), "agent:legacy", worklog.Log{

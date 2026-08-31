@@ -116,6 +116,14 @@ func TestServerEndToEnd(t *testing.T) {
 	if !taskIDRe.MatchString(created.ID) {
 		t.Fatalf("create id = %q, want match %s", created.ID, taskIDRe)
 	}
+	if created.ActivityHealth != ActivityHealthFresh || created.LastMeaningfulAt == "" || created.StagnantAt == "" {
+		t.Fatalf("create activity health = %+v", created)
+	}
+	var listed listOut
+	callRaw("list", nil, &listed)
+	if len(listed.Tasks) != 1 || listed.Tasks[0].ActivityHealth != created.ActivityHealth || listed.Tasks[0].LastMeaningfulAt != created.LastMeaningfulAt || listed.Tasks[0].StagnantAt != created.StagnantAt {
+		t.Fatalf("list activity health = %+v, want %+v", listed.Tasks, created)
+	}
 
 	claimed := call("claim", map[string]any{"id": created.ID})
 	if claimed.Assignee != "agent:claude-1" {

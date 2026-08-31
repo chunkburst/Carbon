@@ -5,12 +5,14 @@ import {
   ArrowLeft,
   Bot,
   ClipboardCopy,
+  ClipboardCheck,
   Check as CheckIcon,
   ChevronDown,
   ChevronRight,
   Circle,
   CircleCheck,
   CircleX,
+  ClockAlert,
   CornerLeftUp,
   ExternalLink,
   FileText,
@@ -28,6 +30,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Assignee } from "@/components/Assignee";
+import { ActivityHealthBadge, UnknownActivityHealthBadge } from "@/components/ActivityHealthBadge";
 import { LogView } from "@/components/LogView";
 import { Markdown } from "@/components/Markdown";
 import { MarkdownEditor } from "@/components/MarkdownEditor";
@@ -42,6 +45,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,7 +82,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { AgentSession, Check, GitCommit as GitCommitData, Provenance, Run, SessionGitContext, Task, TaskEvidence } from "@/lib/api";
-import type { CarbonHomeCluster, CarbonHomeProject, CarbonScope } from "@/lib/carbon-api";
+import type { CarbonHomeCluster, CarbonHomeProject, CarbonReviewCreate, CarbonScope } from "@/lib/carbon-api";
 import { agentPromptForTask, carbonTaskDeepLink } from "@/lib/connect";
 import { useIdentity } from "@/lib/identity";
 import { useI18n } from "@/lib/i18n";
@@ -81,12 +92,15 @@ import {
   useAttestCarbonTask,
   useBulkCarbonMove,
   useCarbonTask,
+  useCarbonConfig,
   useCarbonTaskGitContext,
   useCarbonTaskRuns,
   useCarbonTaskSessions,
   useCarbonTaskTypes,
   useCarbonTasks,
+  useCarbonWorkerIdentities,
   useClaimCarbonLease,
+  useCreateCarbonReview,
   useDeleteCarbonTaskNote,
   useEditCarbonTaskNote,
   usePatchCarbonTask,
@@ -219,6 +233,7 @@ export function CarbonTaskDetailPage({
     projectId: detailProjectId ?? "__cluster__",
   });
   const detailQuery = useCarbonTask(scope, taskId);
+  const configQuery = useCarbonConfig(scope);
   const task = detailQuery.data?.available ? detailQuery.data.data : undefined;
   const tasksQuery = useCarbonTasks(scope);
   const runsQuery = useCarbonTaskRuns(scope, taskId);
@@ -240,6 +255,8 @@ export function CarbonTaskDetailPage({
   const releaseLease = useReleaseCarbonLease(storageKey, scope);
   const reassignLease = useReassignCarbonLease(storageKey, scope);
   const approveLease = useApproveCarbonLease(storageKey, scope);
+  const identitiesQuery = useCarbonWorkerIdentities(scope);
+  const createReview = useCreateCarbonReview(scope);
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -257,6 +274,7 @@ export function CarbonTaskDetailPage({
   const [editingBody, setEditingBody] = useState(false);
   const [note, setNote] = useState("");
   const [carbonExtensionOpen, setCarbonExtensionOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const detailTypeOptions = useMemo(() => {
     const registered = taskTypes.data?.available ? taskTypes.data.data.types ?? [] : [];
@@ -308,6 +326,7 @@ export function CarbonTaskDetailPage({
     setEditingBody(false);
     setNote("");
     setCarbonExtensionOpen(false);
+    setReviewOpen(false);
   }, [task]);
 
   const taskHeader = (
@@ -355,6 +374,9 @@ export function CarbonTaskDetailPage({
                 }}
               >
                 <Bot /> {t("Copy as agent prompt", "复制为智能体提示词")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setReviewOpen(true)}>
+                <ClipboardCheck /> {t("Request review", "发起审核")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
@@ -630,6 +652,28 @@ export function CarbonTaskDetailPage({
                 </TaskEntityContextMenu>
               )}
 
+              {task.activityHealth === "stagnant" && (
+                <Alert className="mt-5 border-warning/35 bg-warning/5">
+                  <ClockAlert className="text-warning" />
+                  <AlertTitle>{t("This task has gone quiet", "这项任务已经停滞")}</AlertTitle>
+                  <AlertDescription className="leading-6">
+                    {t(
+                      "There has been no meaningful action for {period}. The task is still {status}; Carbon has not changed or closed it.",
+                      "已经超过 {period} 没有有效动作。任务仍处于“{status}”，Carbon 没有替你改状态或关闭任务。",
+                      {
+                        period: formatStagnationPeriod(configQuery.data?.available ? configQuery.data.data.taskStagnationAfterSeconds : undefined, t),
+                        status: statusLabel(task.status, t),
+                      },
+                    )}
+                    {task.lastMeaningfulAt && (
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        {t("Last meaningful action: {time}", "上次有效动作：{time}", { time: formatBeijingDateTime(task.lastMeaningfulAt) })}
+                      </span>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {subtasks.length > 0 && (
                 <TaskSubtasks
                   tasks={subtasks}
@@ -821,6 +865,20 @@ export function CarbonTaskDetailPage({
                 <SessionStatus state={task.executionState} />
               </Prop>
             )}
+
+            <Prop label={t("Activity health", "活动健康")}>
+              <div className="grid gap-1.5">
+                {task.activityHealth === "fresh" ? (
+                  <Badge variant="outline" className="text-success">{t("Active recently", "近期有进展")}</Badge>
+                ) : (
+                  <>
+                    <ActivityHealthBadge task={task} thresholdSeconds={configQuery.data?.available ? configQuery.data.data.taskStagnationAfterSeconds : undefined} />
+                    <UnknownActivityHealthBadge task={task} />
+                  </>
+                )}
+                {task.lastMeaningfulAt && <span className="text-[11px] leading-4 text-muted-foreground">{t("Last meaningful action {time}", "上次有效动作在 {time}", { time: timeAgo(task.lastMeaningfulAt) })}</span>}
+              </div>
+            </Prop>
 
             <Prop label={t("Ready", "就绪")}>
               {task.ready ? (
@@ -1101,7 +1159,94 @@ export function CarbonTaskDetailPage({
           </aside>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <RequestReviewDialog
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        task={task}
+        identities={identitiesQuery.data?.available ? identitiesQuery.data.data.records ?? [] : []}
+        identitiesAvailable={identitiesQuery.data?.available === true}
+        pending={createReview.isPending}
+        onSubmit={(input) => createReview.mutate(input, { onSuccess: (result) => result.available && setReviewOpen(false) })}
+      />
     </div>
+  );
+}
+
+function RequestReviewDialog({
+  open,
+  onOpenChange,
+  task,
+  identities,
+  identitiesAvailable,
+  pending,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  task: Task;
+  identities: Array<{ actor: string; roles: string[]; role: string }>;
+  identitiesAvailable: boolean;
+  pending: boolean;
+  onSubmit: (input: CarbonReviewCreate) => void;
+}) {
+  const { t } = useI18n();
+  const [target, setTarget] = useState("plan");
+  const [reviewer, setReviewer] = useState("");
+  const manualChecks = useMemo(
+    () => (task.checks ?? []).map((check, index) => ({ check, index })).filter(({ check }) => !check.cmd?.trim()),
+    [task.checks],
+  );
+  const reviewers = useMemo(
+    () => identities.filter((identity) => identity.roles?.includes("reviewer") || identity.role === "reviewer" || identity.role === "审核者"),
+    [identities],
+  );
+  const canSubmit = Boolean(reviewer && (target === "plan" || target.startsWith("manual:")) && !pending);
+
+  const reset = () => {
+    setTarget("plan");
+    setReviewer("");
+  };
+  const submit = () => {
+    if (!canSubmit) return;
+    if (target === "plan") {
+      onSubmit({ targetKind: "plan", targetId: task.id, taskId: task.id, reviewerActor: reviewer });
+      return;
+    }
+    const index = Number(target.slice("manual:".length));
+    if (!Number.isInteger(index)) return;
+    onSubmit({ targetKind: "manual_check", targetId: `${task.id}#check:${index}`, taskId: task.id, checkId: String(index), reviewerActor: reviewer });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) reset(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("Request a review", "发起审核")}</DialogTitle>
+          <DialogDescription>{t("Choose the exact thing to check and a Worker whose identity includes Reviewer. This is separate from task ownership and lease approval.", "选择要检查的具体对象，并指定带有“审核者”身份的 Worker；这不会改变任务负责人，也不是认领审批。")}</DialogDescription>
+        </DialogHeader>
+        <FieldGroup className="gap-3">
+          <Field>
+            <FieldLabel>{t("What should be reviewed?", "审核什么？")}</FieldLabel>
+            <Select value={target} onValueChange={setTarget}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="plan">{t("Task plan and description", "任务计划与说明")}</SelectItem>
+                {manualChecks.map(({ check, index }) => <SelectItem key={index} value={`manual:${index}`}>{t("Manual check", "人工检查")}：{check.desc}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel>{t("Reviewer", "审核者")}</FieldLabel>
+            <Select value={reviewer} onValueChange={setReviewer} disabled={!reviewers.length}>
+              <SelectTrigger><SelectValue placeholder={t("Choose a reviewer", "选择审核者")} /></SelectTrigger>
+              <SelectContent>{reviewers.map((identity) => <SelectItem key={identity.actor} value={identity.actor}>{identity.actor}</SelectItem>)}</SelectContent>
+            </Select>
+            {!identitiesAvailable ? <p className="text-xs text-muted-foreground">{t("Worker identities are unavailable in this Carbon version.", "当前 Carbon 版本暂时无法读取 Worker 身份。")}</p> : reviewers.length === 0 ? <p className="text-xs text-muted-foreground">{t("No Worker in this project has the Reviewer identity yet. Add it from Agent team → Worker actions.", "这个项目还没有带“审核者”身份的 Worker；请从“智能体团队 → Worker 操作”添加。")}</p> : null}
+          </Field>
+        </FieldGroup>
+        <DialogFooter><Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>{t("Cancel", "取消")}</Button><Button disabled={!canSubmit} onClick={submit}><ClipboardCheck />{t("Send for review", "提交审核")}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -2119,6 +2264,30 @@ function LeaseEditor({
       {actor && <p className="sr-only">{actor}</p>}
     </div>
   );
+}
+
+function formatStagnationPeriod(
+  seconds: number | undefined,
+  t: (english: string, chinese: string, vars?: Record<string, string | number>) => string,
+): string {
+  if (!seconds || seconds <= 0) return t("the configured period", "项目设定周期");
+  if (seconds % 86_400 === 0) return t("{count} days", "{count} 天", { count: seconds / 86_400 });
+  if (seconds % 3_600 === 0) return t("{count} hours", "{count} 小时", { count: seconds / 3_600 });
+  return t("{count} minutes", "{count} 分钟", { count: Math.max(1, Math.round(seconds / 60)) });
+}
+
+function formatBeijingDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
 }
 
 function statusLabel(value: string, t: (english: string, chinese: string) => string): string {

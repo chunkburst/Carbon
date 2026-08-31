@@ -90,6 +90,47 @@ func TestIdentityModeDefaultsOffAndRoundTrips(t *testing.T) {
 	}
 }
 
+func TestNoTraceModeDefaultsOffAndRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, Default("TRACE")); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.NoTraceMode {
+		t.Fatal("no trace mode default = true, want false")
+	}
+	loaded.NoTraceMode = true
+	if err := Save(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := Load(path)
+	if err != nil || !roundTrip.NoTraceMode {
+		t.Fatalf("no trace mode round trip = %#v err=%v", roundTrip, err)
+	}
+}
+
+func TestTaskStagnationAfterDefaultsAndRoundTrips(t *testing.T) {
+	path := writeConfig(t, sample)
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.TaskStagnationDuration(); got != 24*time.Hour {
+		t.Fatalf("legacy task stagnation duration = %s, want 24h", got)
+	}
+	loaded.TaskStagnationAfter = 90 * 60
+	if err := Save(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := Load(path)
+	if err != nil || roundTrip.TaskStagnationAfter != 90*60 || roundTrip.TaskStagnationDuration() != 90*time.Minute {
+		t.Fatalf("task stagnation round-trip = %+v err=%v", roundTrip, err)
+	}
+}
+
 func TestSavePreservesUnknownYAMLKeys(t *testing.T) {
 	body := sample + "future_feature:\n  enabled: true\n  note: preserve me\n"
 	path := writeConfig(t, body)
@@ -123,6 +164,8 @@ func TestValidate(t *testing.T) {
 		{"initial not a state", "prefix: P\ncounter: 0\nstates: [a, b]\nclosed: [b]\ninitial: zzz\ncheck_timeout_default: 1\n", ErrInvalidConfig},
 		{"closed not a subset", "prefix: P\ncounter: 0\nstates: [a, b]\nclosed: [c]\ninitial: a\ncheck_timeout_default: 1\n", ErrInvalidConfig},
 		{"empty states", "prefix: P\ncounter: 0\nstates: []\nclosed: []\ninitial: a\ncheck_timeout_default: 1\n", ErrInvalidConfig},
+		{"negative task stagnation", sample + "task_stagnation_after: -1\n", ErrInvalidConfig},
+		{"oversized task stagnation", sample + "task_stagnation_after: 31536001\n", ErrInvalidConfig},
 		{"valid", sample, nil},
 	}
 	for _, tt := range tests {

@@ -53,6 +53,7 @@ import (
 	"carbon/internal/home"
 	"carbon/internal/lease"
 	"carbon/internal/mcp"
+	"carbon/internal/projectpolicy"
 	"carbon/internal/repo"
 	"carbon/internal/session"
 	"carbon/internal/store"
@@ -207,8 +208,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/config", s.handleSetConfig)
 	mux.HandleFunc("GET /api/worker-identities", s.handleListWorkerIdentities)
+	mux.HandleFunc("GET /api/worker-identities/audit", s.handleListWorkerIdentityAudit)
 	mux.HandleFunc("GET /api/worker-identities/{actor}", s.handleGetWorkerIdentity)
 	mux.HandleFunc("PUT /api/worker-identities/{actor}", s.handlePutWorkerIdentity)
+	mux.HandleFunc("GET /api/incidents", s.handleListIncidents)
+	mux.HandleFunc("POST /api/incidents", s.handleCreateIncident)
+	mux.HandleFunc("GET /api/incidents/{id}", s.handleGetIncident)
+	mux.HandleFunc("PATCH /api/incidents/{id}", s.handleUpdateIncident)
+	mux.HandleFunc("POST /api/incidents/{id}/reply", s.handleReplyIncident)
+	mux.HandleFunc("GET /api/reviews", s.handleListReviews)
+	mux.HandleFunc("POST /api/reviews", s.handleCreateReview)
+	mux.HandleFunc("GET /api/reviews/{id}", s.handleGetReview)
+	mux.HandleFunc("POST /api/reviews/{id}/decide", s.handleDecideReview)
 	mux.HandleFunc("GET /api/tasks", s.handleList)
 	mux.HandleFunc("POST /api/tasks", s.handleCreate)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
@@ -886,16 +897,23 @@ type configReq struct {
 	// (back to the default sh).
 	CheckShell         *string `json:"checkShell"`
 	TrashRetentionDays *int    `json:"trashRetentionDays"`
+	// TaskStagnationAfterSeconds accepts zero as a request to restore the
+	// compatibility default (24h); omission leaves the project setting unchanged.
+	TaskStagnationAfterSeconds *int `json:"taskStagnationAfterSeconds"`
 	// IdentityMode is optional so legacy callers can keep updating an unrelated
 	// setting without accidentally changing the default-off identity policy.
 	IdentityMode *bool `json:"identityMode"`
+	// NoTraceMode suppresses only automatic identity-change process Incidents.
+	NoTraceMode *bool `json:"noTraceMode"`
 }
 
 type configResp struct {
-	Scope              scopeDTO `json:"scope"`
-	CheckShell         string   `json:"checkShell,omitempty"`
-	TrashRetentionDays int      `json:"trashRetentionDays"`
-	IdentityMode       bool     `json:"identityMode"`
+	Scope                      scopeDTO `json:"scope"`
+	CheckShell                 string   `json:"checkShell,omitempty"`
+	TrashRetentionDays         int      `json:"trashRetentionDays"`
+	TaskStagnationAfterSeconds int      `json:"taskStagnationAfterSeconds"`
+	IdentityMode               bool     `json:"identityMode"`
+	NoTraceMode                bool     `json:"noTraceMode"`
 }
 
 func (s *Server) configScope(r *http.Request, legacyPath string) (requestScope, error) {
@@ -911,12 +929,35 @@ func (s *Server) configScope(r *http.Request, legacyPath string) (requestScope, 
 	return s.resolveScope(r)
 }
 
-func (s *Server) configResponse(scope requestScope, cfg config.Config) configResp {
+func (s *Server) configResponse(scope requestScope, cfg config.Config, policy *projectpolicy.Policy) configResp {
 	days := cfg.TrashRetentionDays
 	if days <= 0 {
 		days = 30
 	}
-	return configResp{Scope: scopeDTOFrom(scope), CheckShell: cfg.CheckShell, TrashRetentionDays: days, IdentityMode: cfg.IdentityMode}
+	// The cluster config's historical identity fields remain parseable for legacy
+	// file compatibility, but Carbon project policy never reads them. A cluster-only
+	// response therefore has false/false rather than accidentally reporting a
+	// sibling project's coordination policy.
+	identityMode, noTraceMode := cfg.IdentityMode, cfg.NoTraceMode
+	if scope.Mode == "carbon" {
+		identityMode, noTraceMode = false, false
+		if policy != nil {
+			identityMode, noTraceMode = policy.IdentityMode, policy.NoTraceMode
+		}
+	}
+	return configResp{Scope: scopeDTOFrom(scope), CheckShell: cfg.CheckShell, TrashRetentionDays: days,
+		TaskStagnationAfterSeconds: int(cfg.TaskStagnationDuration().Seconds()), IdentityMode: identityMode, NoTraceMode: noTraceMode}
+}
+
+func policyForConfigScope(scope requestScope, st *store.Store) (*projectpolicy.Policy, error) {
+	if scope.Mode != "carbon" || scope.ProjectID == "" {
+		return nil, nil
+	}
+	value, err := projectpolicy.New(st).Get(scope.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -934,7 +975,12 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.configResponse(scope, cfg))
+	policy, err := policyForConfigScope(scope, store.New(scope.Root))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.configResponse(scope, cfg, policy))
 }
 
 // handleSetConfig edits the workspace's config.yaml. It loads the current config, applies the
@@ -953,14 +999,44 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody(errors.New("config requires legacy path/repo or Carbon cluster scope")))
 		return
 	}
-	if scope.Mode == "carbon" && scope.ProjectID != "" && !scope.Standalone {
-		writeErr(w, mcp.ErrProjectWriteScope)
-		return
-	}
 	st := store.New(scope.Root)
 	cfg, err := st.Config()
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	hasPolicy := req.IdentityMode != nil || req.NoTraceMode != nil
+	hasShared := req.CheckShell != nil || req.TrashRetentionDays != nil || req.TaskStagnationAfterSeconds != nil
+	if scope.Mode == "carbon" && hasPolicy {
+		if scope.ProjectID == "" {
+			writeJSON(w, http.StatusConflict, errBody(mcp.ErrIdentityProjectRequired))
+			return
+		}
+		if hasShared {
+			writeJSON(w, http.StatusUnprocessableEntity, errBody(errors.New("identity policy cannot be updated with cluster/shared config fields")))
+			return
+		}
+		policy, err := projectpolicy.New(st).Get(scope.ProjectID)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if req.IdentityMode != nil {
+			policy.IdentityMode = *req.IdentityMode
+		}
+		if req.NoTraceMode != nil {
+			policy.NoTraceMode = *req.NoTraceMode
+		}
+		policy, err = projectpolicy.New(st).Save(r.Context(), s.actorFor(r), policy)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, s.configResponse(scope, cfg, &policy))
+		return
+	}
+	if scope.Mode == "carbon" && scope.ProjectID != "" && !scope.Standalone {
+		writeErr(w, mcp.ErrProjectWriteScope)
 		return
 	}
 	if req.CheckShell != nil {
@@ -981,14 +1057,29 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.TrashRetentionDays = *req.TrashRetentionDays
 	}
+	if req.TaskStagnationAfterSeconds != nil {
+		if *req.TaskStagnationAfterSeconds < 0 || *req.TaskStagnationAfterSeconds > config.MaxTaskStagnationAfterSeconds {
+			writeJSON(w, http.StatusUnprocessableEntity, errBody(fmt.Errorf("taskStagnationAfterSeconds must be between 0 and %d", config.MaxTaskStagnationAfterSeconds)))
+			return
+		}
+		cfg.TaskStagnationAfter = *req.TaskStagnationAfterSeconds
+	}
 	if req.IdentityMode != nil {
 		cfg.IdentityMode = *req.IdentityMode
+	}
+	if req.NoTraceMode != nil {
+		cfg.NoTraceMode = *req.NoTraceMode
 	}
 	if err := st.SaveConfig(cfg); err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.configResponse(scope, cfg))
+	policy, err := policyForConfigScope(scope, st)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.configResponse(scope, cfg, policy))
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -1020,6 +1111,9 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		dto.UpdatedAt = v.UpdatedAt
 		dto.ExecutionState = v.ExecutionState
 		dto.SessionID = v.SessionID
+		dto.ActivityHealth = v.Health
+		dto.LastMeaningfulAt = v.LastMeaningfulAt
+		dto.StagnantAt = v.StagnantAt
 		if withMarketHistory {
 			dto.Provenance = marketProvenanceDTO(v.Provenance)
 		}
@@ -1419,6 +1513,7 @@ func (s *Server) statusFor(scope requestScope) statusResp {
 			resp.Initial = cfg.Initial
 			resp.Review = cfg.Review()
 			resp.CheckShell = cfg.CheckShell
+			resp.TaskStagnationAfterSeconds = int(cfg.TaskStagnationDuration().Seconds())
 		}
 	}
 	return resp
@@ -1431,46 +1526,50 @@ type statusResp struct {
 	// clients must use requestedCompatLayer together with the embedded contract.
 	CarbonVersion string `json:"carbonVersion"`
 	compat.Contract
-	Scope           scopeDTO `json:"scope"`
-	Initialized     bool     `json:"initialized"`
-	Root            string   `json:"root"`
-	Prefix          string   `json:"prefix,omitempty"`
-	SuggestedPrefix string   `json:"suggestedPrefix"`
-	States          []string `json:"states,omitempty"`
-	Closed          []string `json:"closed,omitempty"`
-	Initial         string   `json:"initial,omitempty"`
-	Review          string   `json:"review,omitempty"`
-	CheckShell      string   `json:"checkShell,omitempty"`
-	Actor           string   `json:"actor"`
-	SuggestedActor  string   `json:"suggestedActor"`
+	Scope                      scopeDTO `json:"scope"`
+	Initialized                bool     `json:"initialized"`
+	Root                       string   `json:"root"`
+	Prefix                     string   `json:"prefix,omitempty"`
+	SuggestedPrefix            string   `json:"suggestedPrefix"`
+	States                     []string `json:"states,omitempty"`
+	Closed                     []string `json:"closed,omitempty"`
+	Initial                    string   `json:"initial,omitempty"`
+	Review                     string   `json:"review,omitempty"`
+	CheckShell                 string   `json:"checkShell,omitempty"`
+	TaskStagnationAfterSeconds int      `json:"taskStagnationAfterSeconds,omitempty"`
+	Actor                      string   `json:"actor"`
+	SuggestedActor             string   `json:"suggestedActor"`
 }
 
 type taskDTO struct {
-	ID             string              `json:"id"`
-	Title          string              `json:"title"`
-	Status         string              `json:"status"`
-	Assignee       string              `json:"assignee,omitempty"`
-	ProjectID      string              `json:"projectId,omitempty"`
-	Type           string              `json:"type,omitempty"`
-	Importance     string              `json:"importance,omitempty"`
-	Version        string              `json:"version,omitempty"`
-	Deps           []string            `json:"deps,omitempty"`
-	Ready          bool                `json:"ready"`
-	UpdatedAt      string              `json:"updatedAt,omitempty"`
-	Rank           float64             `json:"rank,omitempty"`
-	Labels         []string            `json:"labels,omitempty"`
-	Priority       string              `json:"priority,omitempty"`
-	Parent         string              `json:"parent,omitempty"`
-	BlockerReason  string              `json:"blockerReason,omitempty"`
-	Evidence       []task.Evidence     `json:"evidence,omitempty"`
-	ActiveAttempt  string              `json:"activeAttempt,omitempty"`
-	Lease          *task.Lease         `json:"lease,omitempty"`
-	PendingClaims  []task.ClaimRequest `json:"pendingClaims,omitempty"`
-	ExecutionState string              `json:"executionState,omitempty"`
-	SessionID      string              `json:"sessionId,omitempty"`
-	Checks         []checkDTO          `json:"checks,omitempty"`
-	Provenance     []provDTO           `json:"provenance,omitempty"`
-	Body           string              `json:"body,omitempty"`
+	ID               string              `json:"id"`
+	Title            string              `json:"title"`
+	Status           string              `json:"status"`
+	Assignee         string              `json:"assignee,omitempty"`
+	ProjectID        string              `json:"projectId,omitempty"`
+	Type             string              `json:"type,omitempty"`
+	Importance       string              `json:"importance,omitempty"`
+	Version          string              `json:"version,omitempty"`
+	Deps             []string            `json:"deps,omitempty"`
+	Ready            bool                `json:"ready"`
+	UpdatedAt        string              `json:"updatedAt,omitempty"`
+	Rank             float64             `json:"rank,omitempty"`
+	Labels           []string            `json:"labels,omitempty"`
+	Priority         string              `json:"priority,omitempty"`
+	Parent           string              `json:"parent,omitempty"`
+	BlockerReason    string              `json:"blockerReason,omitempty"`
+	Evidence         []task.Evidence     `json:"evidence,omitempty"`
+	ActiveAttempt    string              `json:"activeAttempt,omitempty"`
+	Lease            *task.Lease         `json:"lease,omitempty"`
+	PendingClaims    []task.ClaimRequest `json:"pendingClaims,omitempty"`
+	ExecutionState   string              `json:"executionState,omitempty"`
+	SessionID        string              `json:"sessionId,omitempty"`
+	ActivityHealth   string              `json:"activityHealth"`
+	LastMeaningfulAt string              `json:"lastMeaningfulAt,omitempty"`
+	StagnantAt       string              `json:"stagnantAt,omitempty"`
+	Checks           []checkDTO          `json:"checks,omitempty"`
+	Provenance       []provDTO           `json:"provenance,omitempty"`
+	Body             string              `json:"body,omitempty"`
 }
 
 type checkDTO struct {
@@ -1505,6 +1604,10 @@ func dtoFromTask(t task.Task, ready bool) taskDTO {
 func dtoFromDoc(svc *mcp.Service, doc *store.Doc) taskDTO {
 	d := dtoFromTask(doc.Task, svc.ReadyOf(doc.Task))
 	d.ExecutionState, d.SessionID = svc.ExecutionOf(doc.Task)
+	activity := svc.ActivityOf(doc)
+	d.ActivityHealth = activity.Health
+	d.LastMeaningfulAt = activity.LastMeaningfulAt
+	d.StagnantAt = activity.StagnantAt
 	d.Body = doc.Body
 	if n := len(doc.Provenance); n > 0 {
 		d.UpdatedAt = doc.Provenance[n-1].At

@@ -10,9 +10,23 @@ import (
 )
 
 type workerIdentityPutRequest struct {
+	Roles  []string `json:"roles"`
 	Role   string   `json:"role"`
 	Types  []string `json:"types"`
 	Reason string   `json:"reason"`
+}
+
+func (s *Server) handleListWorkerIdentityAudit(w http.ResponseWriter, r *http.Request) {
+	svc, _, ok := s.svcFor(w, r)
+	if !ok {
+		return
+	}
+	snapshot, err := svc.ListWorkerIdentityAudit()
+	if err != nil {
+		writeWorkerIdentityErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 // handleListWorkerIdentities exposes the selected standalone-project or shared-cluster
@@ -53,11 +67,15 @@ func (s *Server) handlePutWorkerIdentity(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req workerIdentityPutRequest
-	if !decode(w, r, &req) {
+	if !decodeStrictJSON(w, r, &req) {
+		return
+	}
+	if req.Roles != nil && strings.TrimSpace(req.Role) != "" {
+		writeJSON(w, http.StatusBadRequest, errBody(errors.New("roles and role are mutually exclusive")))
 		return
 	}
 	result, err := svc.ManageWorkerIdentity(r.Context(), strings.TrimSpace(r.PathValue("actor")), mcp.WorkerIdentityClaimInput{
-		Role: req.Role, Types: append([]string(nil), req.Types...), Reason: req.Reason,
+		Roles: append([]string(nil), req.Roles...), Role: req.Role, Types: append([]string(nil), req.Types...), Reason: req.Reason,
 	})
 	if err != nil {
 		writeWorkerIdentityErr(w, err)
@@ -74,8 +92,12 @@ func writeWorkerIdentityErr(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusForbidden, errBody(err))
 	case errors.Is(err, mcp.ErrIdentityModeDisabled):
 		writeJSON(w, http.StatusConflict, errBody(err))
+	case errors.Is(err, identity.ErrLegacyProjectionConflict):
+		writeJSON(w, http.StatusConflict, errBody(err))
 	case errors.Is(err, mcp.ErrIdentityScopeRequired):
 		writeJSON(w, http.StatusBadRequest, errBody(err))
+	case errors.Is(err, mcp.ErrIdentityProjectRequired):
+		writeJSON(w, http.StatusConflict, errBody(err))
 	case errors.Is(err, mcp.ErrIdentityAgentRequired),
 		errors.Is(err, mcp.ErrIdentityTypeUnknown),
 		errors.Is(err, identity.ErrInvalidIdentity),

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"carbon/internal/lease"
+	"carbon/internal/projectpolicy"
 	"carbon/internal/repo"
 	"carbon/internal/store"
 )
@@ -18,12 +19,7 @@ func newIdentityGuardServices(t *testing.T) (*store.Store, *Service, *Service) {
 		t.Fatal(err)
 	}
 	data := store.New(root)
-	cfg, err := data.Config()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.IdentityMode = true
-	if err := data.SaveConfig(cfg); err != nil {
+	if _, err := projectpolicy.New(data).Save(context.Background(), "human:lead", projectpolicy.Policy{Version: 1, ProjectID: "project", IdentityMode: true}); err != nil {
 		t.Fatal(err)
 	}
 	source := t.TempDir()
@@ -31,6 +27,13 @@ func newIdentityGuardServices(t *testing.T) (*store.Store, *Service, *Service) {
 	return data,
 		NewScopedService(data, "human:lead", scope, nil),
 		NewScopedService(data, "agent:worker", scope, nil)
+}
+
+func setWorkerIdentityPolicy(t *testing.T, data *store.Store, enabled bool) {
+	t.Helper()
+	if _, err := projectpolicy.New(data).Save(context.Background(), "human:lead", projectpolicy.Policy{Version: 1, ProjectID: "project", IdentityMode: enabled}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestIdentityModeGuardsClaimBeginReassignAndApproval(t *testing.T) {
@@ -102,14 +105,7 @@ func TestIdentityModeGuardsClaimBeginReassignAndApproval(t *testing.T) {
 func TestIdentityModeDisabledAndUntypedTasksRemainCompatible(t *testing.T) {
 	data, human, _ := newIdentityGuardServices(t)
 	ctx := context.Background()
-	cfg, err := data.Config()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.IdentityMode = false
-	if err := data.SaveConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
+	setWorkerIdentityPolicy(t, data, false)
 	unclaimed := NewScopedService(data, "agent:no-record", human.Scope(), nil)
 	typed, err := human.CreateContext(ctx, store.Draft{Title: "compat typed", Type: "patch", Importance: "normal"})
 	if err != nil {
@@ -120,10 +116,7 @@ func TestIdentityModeDisabledAndUntypedTasksRemainCompatible(t *testing.T) {
 	}
 
 	// A historical task with no type remains claimable even after re-enabling mode.
-	cfg.IdentityMode = true
-	if err := data.SaveConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
+	setWorkerIdentityPolicy(t, data, true)
 	legacy, err := data.Create(store.Draft{Title: "old untyped", ProjectID: "project", ProjectIDSet: true}, "human:lead", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)

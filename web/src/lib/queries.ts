@@ -1556,9 +1556,19 @@ export function useSaveCarbonConfig(scope: carbon.CarbonScopeInput) {
       if (!result.available) return;
       qc.invalidateQueries({ queryKey: carbonKey("config", scopeKey) });
       qc.invalidateQueries({ queryKey: carbonKey("worker-identities", scopeKey) });
-      toast.success(input.identityMode !== undefined
-        ? translate("Identity mode updated", "身份模式已更新")
-        : translate("Trash retention saved", "垃圾站保留期限已保存"));
+      if (input.taskStagnationAfterSeconds !== undefined) {
+        qc.invalidateQueries({ queryKey: carbonKey("tasks", scopeKey) });
+        qc.invalidateQueries({ queryKey: carbonKey("task", scopeKey) });
+      }
+      toast.success(
+        input.identityMode !== undefined
+          ? translate("Identity mode updated", "身份模式已更新")
+          : input.noTraceMode !== undefined
+            ? translate("No-trace mode updated", "无修模式已更新")
+          : input.taskStagnationAfterSeconds !== undefined
+            ? translate("Task stagnation period saved", "任务停滞周期已保存")
+            : translate("Trash retention saved", "垃圾站保留期限已保存"),
+      );
     },
     onError: fail,
   });
@@ -1579,6 +1589,19 @@ export function useCarbonWorkerIdentities(scope: carbon.CarbonScopeInput, enable
   });
 }
 
+export function useCarbonWorkerIdentityAudit(scope: carbon.CarbonScopeInput, enabled = true) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  return useQuery({
+    queryKey: carbonKey("worker-identity-audit", scopeKey),
+    queryFn: () => carbon.listCarbonWorkerIdentityAudit(scope),
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: enabled ? 7_500 : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
+}
+
 export function useUpdateCarbonWorkerIdentity(scope: carbon.CarbonScopeInput) {
   const scopeKey = carbon.carbonScopeKey(scope);
   const qc = useQueryClient();
@@ -1588,7 +1611,120 @@ export function useUpdateCarbonWorkerIdentity(scope: carbon.CarbonScopeInput) {
     onSuccess: (result) => {
       if (!result.available) return;
       qc.invalidateQueries({ queryKey: carbonKey("worker-identities", scopeKey) });
+      qc.invalidateQueries({ queryKey: carbonKey("worker-identity-audit", scopeKey) });
+      qc.invalidateQueries({ queryKey: carbonKey("incidents", scopeKey) });
       toast.success(translate("Worker identity saved", "Worker 身份已保存"));
+    },
+    onError: fail,
+  });
+}
+
+export function useCarbonIncidents(scope: carbon.CarbonScopeInput, enabled = true) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  return useQuery({
+    queryKey: carbonKey("incidents", scopeKey),
+    queryFn: () => carbon.listCarbonIncidents(scope),
+    enabled,
+    refetchInterval: enabled ? 7_500 : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
+}
+
+export function useCarbonIncident(scope: carbon.CarbonScopeInput, id?: string) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  return useQuery({
+    queryKey: carbonKey("incident", scopeKey, id ?? ""),
+    queryFn: () => carbon.getCarbonIncident(scope, id as string),
+    enabled: Boolean(id),
+    retry: false,
+  });
+}
+
+function refreshCarbonIncidents(qc: QueryClient, scopeKey: string, id?: string) {
+  qc.invalidateQueries({ queryKey: carbonKey("incidents", scopeKey) });
+  if (id) qc.invalidateQueries({ queryKey: carbonKey("incident", scopeKey, id) });
+}
+
+export function useCreateCarbonIncident(scope: carbon.CarbonScopeInput) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: carbon.CarbonIncidentCreate) => carbon.createCarbonIncident(scope, input),
+    onSuccess: (result) => {
+      if (!result.available) return;
+      refreshCarbonIncidents(qc, scopeKey, result.data.id);
+      toast.success(translate("Incident recorded", "事件已记录"));
+    },
+    onError: fail,
+  });
+}
+
+export function useUpdateCarbonIncident(scope: carbon.CarbonScopeInput) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: carbon.CarbonIncidentStatus }) =>
+      carbon.updateCarbonIncident(scope, id, status),
+    onSuccess: (result, variables) => {
+      if (!result.available) return;
+      refreshCarbonIncidents(qc, scopeKey, variables.id);
+      toast.success(translate("Incident status updated", "事件状态已更新"));
+    },
+    onError: fail,
+  });
+}
+
+export function useReplyCarbonIncident(scope: carbon.CarbonScopeInput) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: string }) => carbon.replyCarbonIncident(scope, id, body),
+    onSuccess: (result, variables) => {
+      if (!result.available) return;
+      refreshCarbonIncidents(qc, scopeKey, variables.id);
+      toast.success(translate("Reply added", "回复已添加"));
+    },
+    onError: fail,
+  });
+}
+
+export function useCarbonReviews(scope: carbon.CarbonScopeInput, enabled = true) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  return useQuery({
+    queryKey: carbonKey("reviews", scopeKey),
+    queryFn: () => carbon.listCarbonReviews(scope),
+    enabled,
+    refetchInterval: enabled ? 7_500 : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
+}
+
+export function useCreateCarbonReview(scope: carbon.CarbonScopeInput) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: carbon.CarbonReviewCreate) => carbon.createCarbonReview(scope, input),
+    onSuccess: (result) => {
+      if (!result.available) return;
+      qc.invalidateQueries({ queryKey: carbonKey("reviews", scopeKey) });
+      toast.success(translate("Review requested", "已提交审核"));
+    },
+    onError: fail,
+  });
+}
+
+export function useDecideCarbonReview(scope: carbon.CarbonScopeInput) {
+  const scopeKey = carbon.carbonScopeKey(scope);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status, decision }: { id: string; status: Exclude<carbon.CarbonReviewStatus, "pending">; decision: string }) =>
+      carbon.decideCarbonReview(scope, id, status, decision),
+    onSuccess: (result) => {
+      if (!result.available) return;
+      qc.invalidateQueries({ queryKey: carbonKey("reviews", scopeKey) });
+      toast.success(translate("Review completed", "审核已处理"));
     },
     onError: fail,
   });
@@ -1970,8 +2106,12 @@ export function useAddHomeProject(home?: string) {
   return useMutation({
     mutationFn: (input: { clusterId?: string; name: string; slug?: string; description?: string; kind?: string; sourcePath: string }) =>
       carbon.addHomeProject({ home, ...input }),
-    onSuccess: (result) => {
-      if (result.available) qc.invalidateQueries({ queryKey: carbonKey("home", home ?? "default") });
+    onSuccess: async (result) => {
+      if (!result.available) return;
+      // `Create and open` navigates to the returned stable project id. Wait for
+      // the Home catalog to contain that id first, otherwise HomeShell can briefly
+      // reject the route as unknown and restore the previously remembered project.
+      await qc.invalidateQueries({ queryKey: carbonKey("home", home ?? "default") });
     },
     onError: fail,
   });

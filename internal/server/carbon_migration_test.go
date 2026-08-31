@@ -166,25 +166,42 @@ func TestCarbonConfigExposesAndValidatesTrashRetention(t *testing.T) {
 	if before.TrashRetentionDays != 30 {
 		t.Fatalf("default retention = %d, want 30", before.TrashRetentionDays)
 	}
+	if before.TaskStagnationAfterSeconds != 24*60*60 {
+		t.Fatalf("default task stagnation after = %d, want 86400", before.TaskStagnationAfterSeconds)
+	}
 	if before.IdentityMode {
 		t.Fatalf("identity mode default = true, want false")
+	}
+	if before.NoTraceMode {
+		t.Fatalf("no trace mode default = true, want false")
 	}
 	var changed configResp
 	call(t, h, http.MethodPost, "/api/config", `{"trashRetentionDays":14}`, &changed)
 	if changed.TrashRetentionDays != 14 {
 		t.Fatalf("changed retention = %d, want 14", changed.TrashRetentionDays)
 	}
-	var identityChanged configResp
-	call(t, h, http.MethodPost, "/api/config", `{"identityMode":true}`, &identityChanged)
-	if !identityChanged.IdentityMode {
-		t.Fatalf("identity mode toggle = %#v", identityChanged)
+	var stagnationChanged configResp
+	call(t, h, http.MethodPost, "/api/config", `{"taskStagnationAfterSeconds":7200}`, &stagnationChanged)
+	if stagnationChanged.TaskStagnationAfterSeconds != 7200 {
+		t.Fatalf("changed task stagnation after = %d, want 7200", stagnationChanged.TaskStagnationAfterSeconds)
+	}
+	var stagnationDefault configResp
+	call(t, h, http.MethodPost, "/api/config", `{"taskStagnationAfterSeconds":0}`, &stagnationDefault)
+	if stagnationDefault.TaskStagnationAfterSeconds != 24*60*60 {
+		t.Fatalf("reset task stagnation after = %d, want 86400", stagnationDefault.TaskStagnationAfterSeconds)
+	}
+	if code, body := raw(h, http.MethodPost, "/api/config", `{"identityMode":true}`); code != http.StatusConflict {
+		t.Fatalf("cluster-only identity policy mutation = %d %s, want 409", code, body)
 	}
 	if code, body := raw(h, http.MethodPost, "/api/config", `{"trashRetentionDays":0}`); code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid retention = %d %s, want 422", code, body)
 	}
+	if code, body := raw(h, http.MethodPost, "/api/config", `{"taskStagnationAfterSeconds":-1}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid task stagnation after = %d %s, want 422", code, body)
+	}
 }
 
-func TestIdentityModeConfigAllowsStandaloneButRejectsClusterProjectScope(t *testing.T) {
+func TestIdentityModeConfigIsProjectScopedForStandaloneAndClusterMembers(t *testing.T) {
 	homeRoot := t.TempDir()
 	if _, err := home.Ensure(homeRoot); err != nil {
 		t.Fatal(err)
@@ -209,8 +226,13 @@ func TestIdentityModeConfigAllowsStandaloneButRejectsClusterProjectScope(t *test
 		t.Fatalf("standalone identity config = %#v", changed)
 	}
 	clusterProjectQuery := url.Values{"home": {homeRoot}, "cluster": {cluster.ID}, "project": {member.ID}}.Encode()
-	if code, body := raw(h, http.MethodPost, "/api/config?"+clusterProjectQuery, `{"identityMode":true}`); code != http.StatusUnprocessableEntity {
-		t.Fatalf("cluster project config mutation = %d %s, want 422", code, body)
+	var memberChanged configResp
+	call(t, h, http.MethodPost, "/api/config?"+clusterProjectQuery, `{"identityMode":true,"noTraceMode":true}`, &memberChanged)
+	if !memberChanged.IdentityMode || !memberChanged.NoTraceMode || memberChanged.Scope.ProjectID != member.ID {
+		t.Fatalf("cluster member identity policy = %#v", memberChanged)
+	}
+	if code, body := raw(h, http.MethodPost, "/api/config?"+clusterProjectQuery, `{"identityMode":false,"trashRetentionDays":14}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("mixed project policy/shared config mutation = %d %s, want 422", code, body)
 	}
 }
 

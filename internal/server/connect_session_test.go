@@ -30,7 +30,7 @@ func newConnectSessionFixture(t *testing.T) connectSessionFixture {
 	}
 	source := t.TempDir()
 	project, err := home.AddStandaloneProject(homeRoot, home.AddProjectRequest{
-		Name: "pronovel", SourcePath: source,
+		Name: "sample-project", SourcePath: source,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,12 +80,12 @@ func integrationStatusForID(t *testing.T, body, id string) connect.AgentStatus {
 func TestProjectSessionConnectUsesHomeOnlyProcessBoundary(t *testing.T) {
 	fixture := newConnectSessionFixture(t)
 	connectPath := "/api/connect/cursor?routing=session"
-	request := `{"actor":"agent:pronovel","configProjectId":"` + fixture.project.ID + `"}`
+	request := `{"actor":"agent:planner","configProjectId":"` + fixture.project.ID + `"}`
 	if code, body := raw(fixture.handler, http.MethodPost, connectPath, request); code != http.StatusOK {
 		t.Fatalf("project-session connect = %d %s", code, body)
 	}
 	wantArgs := []string{
-		"serve", "--actor", "agent:pronovel",
+		"serve", "--actor", "agent:planner",
 		"--home", fixture.homeRoot,
 		"--project-session",
 		"--compat-layer", connect.CarbonCompatLayer,

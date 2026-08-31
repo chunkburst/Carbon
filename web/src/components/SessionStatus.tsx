@@ -9,7 +9,7 @@ export function SessionStatus({ state, compact = false }: { state?: ExecutionSta
   const { t } = useI18n();
   const states = {
     active: { label: t("Active", "进行中"), icon: CircleDot, className: "text-brand" },
-    stalled: { label: t("Stalled", "已停滞"), icon: ClockAlert, className: "text-destructive" },
+    stalled: { label: t("Session unresponsive", "会话无响应"), icon: ClockAlert, className: "text-destructive" },
     awaiting_review: { label: t("Awaiting review", "等待审核"), icon: ScanEye, className: "text-foreground" },
   } satisfies Record<ExecutionState, { label: string; icon: typeof CircleDot; className: string }>;
   if (!state) return null;

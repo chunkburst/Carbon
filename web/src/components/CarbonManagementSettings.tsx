@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronsUpDown, ListTree, Pencil, Plus, Save, ShieldCheck, Tags, UserRoundCog } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronsUpDown, ClockAlert, EyeOff, History, ListTree, Pencil, Plus, Save, ShieldCheck, Tags, UserRoundCog } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,20 +15,24 @@ import {
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldTitle } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { WorkerIdentity } from "@/components/WorkerIdentity";
 import type { CarbonScope, CarbonWorkerIdentity } from "@/lib/carbon-api";
 import {
   useCarbonConfig,
   useCarbonTaskTypes,
+  useCarbonWorkerIdentityAudit,
   useCarbonWorkerIdentities,
   useCreateCarbonTaskType,
   useSaveCarbonConfig,
   useUpdateCarbonWorkerIdentity,
 } from "@/lib/queries";
+import { displayName } from "@/lib/identity";
 import { useI18n } from "@/lib/i18n";
 import { carbonTaskTypeLabel } from "@/lib/task-labels";
 import { cn, timeAgo } from "@/lib/utils";
+import { CARBON_BUILT_IN_ROLES, workerRoleLabel } from "@/lib/worker-roles";
 
 const BUILT_IN_TYPES = ["foundation", "library", "patch", "extension", "plugin"] as const;
 
@@ -45,10 +49,16 @@ function storeConfigScope(scope: CarbonScope): CarbonScope | undefined {
   return undefined;
 }
 
+function projectIdentityScope(scope: CarbonScope): CarbonScope | undefined {
+  if (!scope.home || !scope.projectId) return undefined;
+  return { home: scope.home, clusterId: scope.clusterId, projectId: scope.projectId };
+}
+
 export function CarbonManagementSettings({ scope }: { scope: CarbonScope }) {
   const { t } = useI18n();
   const configScope = storeConfigScope(scope);
   const clusterScope = clusterConfigScope(scope);
+  const identityScope = projectIdentityScope(scope);
   if (!configScope) {
     return (
       <Alert className="mt-4">
@@ -59,33 +69,114 @@ export function CarbonManagementSettings({ scope }: { scope: CarbonScope }) {
   }
   return (
     <section className="mt-4 grid gap-5 border-t pt-4">
-      <CarbonIdentitySettings scope={configScope} />
+      <CarbonTaskStagnationSettings scope={configScope} />
+      {identityScope && <CarbonIdentitySettings scope={identityScope} />}
       {clusterScope && <CarbonTrashRetention scope={clusterScope} />}
       <CarbonTypeManager scope={configScope} />
     </section>
   );
 }
 
-function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
+type StagnationUnit = "minutes" | "hours" | "days";
+
+function stagnationInput(seconds: number): { amount: string; unit: StagnationUnit } {
+  if (seconds > 0 && seconds % 86_400 === 0) return { amount: String(seconds / 86_400), unit: "days" };
+  if (seconds > 0 && seconds % 3_600 === 0) return { amount: String(seconds / 3_600), unit: "hours" };
+  return { amount: String(Math.max(1, Math.round(seconds / 60))), unit: "minutes" };
+}
+
+function CarbonTaskStagnationSettings({ scope }: { scope: CarbonScope }) {
+  const { t } = useI18n();
+  const config = useCarbonConfig(scope);
+  const save = useSaveCarbonConfig(scope);
+  const [amount, setAmount] = useState("24");
+  const [unit, setUnit] = useState<StagnationUnit>("hours");
+
+  useEffect(() => {
+    if (!config.data?.available) return;
+    const next = stagnationInput(config.data.data.taskStagnationAfterSeconds || 86_400);
+    setAmount(next.amount);
+    setUnit(next.unit);
+  }, [config.data]);
+
+  const multiplier = unit === "days" ? 86_400 : unit === "hours" ? 3_600 : 60;
+  const parsed = Number(amount);
+  const seconds = Math.round(parsed * multiplier);
+  const valid = Number.isFinite(parsed) && parsed > 0 && seconds >= 60 && seconds <= 31_536_000;
+  const current = config.data?.available ? config.data.data.taskStagnationAfterSeconds : undefined;
+  const unitLabel = unit === "days" ? t("days", "天") : unit === "hours" ? t("hours", "小时") : t("minutes", "分钟");
+
+  return (
+    <div className="grid gap-3">
+      <div>
+        <p className="flex items-center gap-2 text-sm font-medium"><ClockAlert className="size-4" />{t("Task stagnation", "任务停滞周期")}</p>
+        <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+          {t(
+            "An open task is marked stagnant after this long without a meaningful action. Its workflow status does not change; reads, polling, heartbeats, and automatic renewals do not reset the timer.",
+            "开放任务超过这个周期没有有效动作后，会附加“停滞”标记；原任务状态不会改变。读取、轮询、心跳和自动续期不会重置计时。",
+          )}
+        </p>
+      </div>
+      {config.data?.available === false ? (
+        <p className="text-xs text-muted-foreground">{t("Task stagnation settings are unavailable in this installation.", "当前 Carbon 服务暂不支持停滞周期设置。")}</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="number"
+            min={unit === "minutes" ? 1 : 0.02}
+            step={unit === "minutes" ? 1 : 0.5}
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+            className="h-8 w-24"
+            aria-label={t("Stagnation period", "停滞周期")}
+          />
+          <Select value={unit} onValueChange={(value) => setUnit(value as StagnationUnit)}>
+            <SelectTrigger size="sm" className="w-24" aria-label={t("Time unit", "时间单位")}><SelectValue>{unitLabel}</SelectValue></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="minutes">{t("Minutes", "分钟")}</SelectItem>
+              <SelectItem value="hours">{t("Hours", "小时")}</SelectItem>
+              <SelectItem value="days">{t("Days", "天")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" disabled={!valid || save.isPending || seconds === current} onClick={() => save.mutate({ taskStagnationAfterSeconds: seconds })}>
+            {t("Save", "保存")}
+          </Button>
+          <Button size="sm" variant="ghost" disabled={save.isPending || current === 86_400} onClick={() => save.mutate({ taskStagnationAfterSeconds: 0 })}>
+            {t("Use 24h default", "恢复 24 小时")}
+          </Button>
+        </div>
+      )}
+      {!valid && amount !== "" && <p className="text-xs text-destructive">{t("Choose a period from 1 minute to 365 days.", "请输入 1 分钟到 365 天之间的周期。")}</p>}
+    </div>
+  );
+}
+
+export function CarbonIdentitySettings({ scope, initialActor }: { scope: CarbonScope; initialActor?: string }) {
   const { t } = useI18n();
   const config = useCarbonConfig(scope);
   const saveConfig = useSaveCarbonConfig(scope);
   const identities = useCarbonWorkerIdentities(scope);
+  const audit = useCarbonWorkerIdentityAudit(scope);
   const updateIdentity = useUpdateCarbonWorkerIdentity(scope);
   const types = useCarbonTaskTypes(scope);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<CarbonWorkerIdentity | null>(null);
   const [actor, setActor] = useState("");
-  const [role, setRole] = useState("");
+  const [roles, setRoles] = useState<string[]>([]);
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [reason, setReason] = useState("");
+  const [saveOutcome, setSaveOutcome] = useState<"traced" | "no_trace" | null>(null);
+  const hydratedActor = useRef<string | undefined>(undefined);
 
   const modeEnabled = identities.data?.available
     ? identities.data.data.modeEnabled
     : config.data?.available
       ? Boolean(config.data.data.identityMode)
       : false;
-  const records = identities.data?.available ? identities.data.data.records ?? [] : [];
+  const records = useMemo(
+    () => (identities.data?.available ? identities.data.data.records ?? [] : []),
+    [identities.data],
+  );
   const typeOptions = useMemo(() => {
     const custom = types.data?.available ? types.data.data.custom ?? [] : [];
     const registered = types.data?.available ? types.data.data.types ?? [] : [];
@@ -99,30 +190,38 @@ function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
     setEditorOpen(false);
     setEditing(null);
     setActor("");
-    setRole("");
+    setRoles([]);
     setSelectedTypes([]);
     setReason("");
   };
-  const edit = (record?: CarbonWorkerIdentity) => {
+  const edit = (record?: CarbonWorkerIdentity, actorHint?: string) => {
+    setSaveOutcome(null);
     setEditing(record ?? null);
-    setActor(record?.actor ?? "agent:");
-    setRole(record?.role ?? "");
+    setActor(record?.actor ?? actorHint ?? "agent:");
+    setRoles(record?.roles?.length ? record.roles : record?.role ? [record.role] : []);
     setSelectedTypes(record?.types ?? []);
     setReason("");
     setEditorOpen(true);
   };
+  useEffect(() => {
+    if (!initialActor || hydratedActor.current === initialActor) return;
+    const record = records.find((item) => item.actor === initialActor);
+    if (!identities.isLoading) {
+      hydratedActor.current = initialActor;
+      edit(record, initialActor);
+    }
+  }, [identities.isLoading, initialActor, records]);
   const normalizedActor = actor.trim();
-  const normalizedRole = role.trim();
+  const normalizedRoles = [...new Set(roles.map((role) => role.trim()).filter(Boolean))].sort();
   const normalizedTypes = [...new Set(selectedTypes)].sort();
   const originalTypes = [...(editing?.types ?? [])].sort();
   const changed = !editing
-    || normalizedRole !== editing.role
+    || normalizedRoles.join("\u0000") !== [...(editing.roles?.length ? editing.roles : [editing.role])].sort().join("\u0000")
     || normalizedTypes.join("\u0000") !== originalTypes.join("\u0000");
   const validActor = normalizedActor.startsWith("agent:") && !/\s/.test(normalizedActor.slice("agent:".length)) && normalizedActor.length > "agent:".length;
   const reasonRequired = Boolean(editing && changed);
-  const canSave = modeEnabled
-    && validActor
-    && Boolean(normalizedRole)
+  const canSave = validActor
+    && normalizedRoles.length > 0
     && normalizedTypes.length > 0
     && changed
     && (!reasonRequired || Boolean(reason.trim()))
@@ -133,11 +232,17 @@ function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
     updateIdentity.mutate({
       actor: normalizedActor,
       input: {
-        role: normalizedRole,
+        roles: normalizedRoles,
         types: normalizedTypes,
         ...(reason.trim() ? { reason: reason.trim() } : {}),
       },
-    }, { onSuccess: (result) => result.available && resetEditor() });
+    }, {
+      onSuccess: (result) => {
+        if (!result.available) return;
+        setSaveOutcome(config.data?.available && config.data.data.noTraceMode ? "no_trace" : "traced");
+        resetEditor();
+      },
+    });
   };
 
   const unavailable = config.data?.available === false || identities.data?.available === false;
@@ -163,6 +268,14 @@ function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
         </Field>
       </FieldGroup>
 
+      <Field orientation="horizontal" className="items-center rounded-xl border bg-muted/15 p-3">
+        <FieldContent className="min-w-0">
+          <FieldTitle><EyeOff className="size-4" />{t("No-trace mode", "无修模式")}</FieldTitle>
+          <FieldDescription>{t("When enabled, a human identity change still enters the permanent identity history, but Carbon does not create a matching Incident. Manually recorded Incidents are never hidden.", "启用后，人类调整身份仍会进入永久身份历史，但 Carbon 不再为这次调整自动创建事件；手工记录的事件不会被隐藏。")}</FieldDescription>
+        </FieldContent>
+        <Switch checked={config.data?.available ? config.data.data.noTraceMode : false} disabled={unavailable || saveConfig.isPending || config.isLoading} onCheckedChange={(noTraceMode) => saveConfig.mutate({ noTraceMode })} aria-label={t("Enable no-trace mode", "启用无修模式")} />
+      </Field>
+
       {unavailable && (
         <Alert>
           <AlertTitle>{t("Agent role mode needs an update", "智能体身份模式需要更新 Carbon")}</AlertTitle>
@@ -174,12 +287,24 @@ function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
         <div className="rounded-lg border border-dashed px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           {t(
             "Free collaboration is active: existing agents and older Carbon clients can still take tasks without setting a role.",
-            "当前为自由协作模式：已有智能体和旧版 Carbon 客户端无需设置身份，也能继续接手任务。",
+            "当前为自由协作模式：身份分工仍会保留，也可以提前设置；只是接手任务时暂不限制角色和任务类型，旧版客户端也能照常工作。",
           )}
         </div>
       )}
 
-      {modeEnabled && (
+      {saveOutcome && (
+        <Alert>
+          <History />
+          <AlertTitle>{t("Responsibilities updated", "分工已更新")}</AlertTitle>
+          <AlertDescription>
+            {saveOutcome === "no_trace"
+              ? t("The permanent identity history was recorded. No automatic Incident was created because no-trace mode is enabled.", "永久身份历史已经记录；当前启用了无修模式，因此没有自动创建事件。")
+              : t("The permanent identity history was recorded, and Carbon also created an Incident so the team can follow the change.", "永久身份历史已经记录，Carbon 也创建了一条事件，团队可以继续跟进这次调整。")}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!unavailable && (
         <div className="grid gap-3 rounded-xl border bg-panel p-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
@@ -200,7 +325,7 @@ function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
               {records.map((record) => (
                 <div key={record.actor} className="group flex flex-wrap items-center gap-2 rounded-lg border bg-background px-3 py-2 transition-colors duration-200 hover:bg-muted/25 motion-reduce:transition-none">
                   <WorkerIdentity actor={record.actor} compact />
-                  <Badge variant="secondary">{record.role}</Badge>
+                  {(record.roles?.length ? record.roles : [record.role]).map((role) => <Badge key={role} variant="secondary">{workerRoleLabel(role, t)}</Badge>)}
                   <div className="flex min-w-0 flex-1 flex-wrap gap-1">
                     {record.types.map((type) => <Badge key={type} variant="outline">{typeOptions.find((item) => item.key === type)?.label ?? carbonTaskTypeLabel(type, t)}</Badge>)}
                   </div>
@@ -224,9 +349,9 @@ function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
                   {actor && !validActor && <FieldError>{t("Enter a connection ID such as agent:codex.", "请输入类似 agent:codex 的连接标识。")}</FieldError>}
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="worker-identity-role">{t("Role", "身份角色")}</FieldLabel>
-                  <Input id="worker-identity-role" value={role} maxLength={80} onChange={(event) => setRole(event.target.value)} placeholder={t("Architect, task publisher…", "架构师、任务发布者……")} />
-                  <FieldDescription>{t("A stable human-readable responsibility, not a permission level.", "用于描述稳定职责，不代表系统权限等级。")}</FieldDescription>
+                  <FieldLabel>{t("Roles", "身份角色")}</FieldLabel>
+                  <IdentityRolePicker value={roles} onChange={setRoles} />
+                  <FieldDescription>{t("A Worker may carry several stable responsibilities. Reviewer marks who can handle explicit plan and manual-check reviews.", "一个 Worker 可以承担多个稳定职责；“审核者”用于处理明确的计划审核和人工检查审核。")}</FieldDescription>
                 </Field>
               </div>
               <Field>
@@ -248,9 +373,48 @@ function CarbonIdentitySettings({ scope }: { scope: CarbonScope }) {
               </div>
             </FieldGroup>
           )}
+
+          {(audit.data?.available ? audit.data.data.audits ?? [] : []).length > 0 && (
+            <div className="grid gap-2 border-t pt-3">
+              <p className="flex items-center gap-2 text-sm font-medium"><History className="size-4" />{t("Identity history", "身份变更历史")}</p>
+              <div className="grid gap-1.5">
+                {(audit.data?.available ? audit.data.data.audits ?? [] : []).slice().reverse().slice(0, 12).map((item) => (
+                  <div key={item.id} className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/30 px-3 py-2 text-xs">
+                    <WorkerIdentity actor={item.actor} compact />
+                    <span className="text-muted-foreground">{item.operation === "claimed" ? t("set responsibilities", "设置了分工") : t("changed responsibilities", "调整了分工")}</span>
+                    <div className="flex flex-wrap gap-1">{item.afterRoles.map((role) => <Badge key={role} variant="outline">{workerRoleLabel(role, t)}</Badge>)}</div>
+                    <span className="ml-auto text-[10px] text-muted-foreground">{displayName(item.changedBy)} · {timeAgo(item.at)}</span>
+                    <code className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">{item.changedBy}</code>
+                    {item.reason && <p className="w-full text-muted-foreground">{item.reason}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>
+  );
+}
+
+function IdentityRolePicker({ value, onChange }: { value: string[]; onChange: (roles: string[]) => void }) {
+  const { t } = useI18n();
+  const [custom, setCustom] = useState("");
+  const selected = new Set(value);
+  const normalizedCustom = custom.trim().toLowerCase();
+  const customValid = /^[a-z][a-z0-9_-]{0,79}$/.test(normalizedCustom) && !selected.has(normalizedCustom);
+  const toggle = (role: string) => onChange(selected.has(role) ? value.filter((item) => item !== role) : [...value, role]);
+  return (
+    <div className="grid gap-2 rounded-lg border bg-background p-2">
+      <div className="flex flex-wrap gap-1.5">
+        {CARBON_BUILT_IN_ROLES.map((role) => <Button key={role} type="button" size="xs" variant={selected.has(role) ? "secondary" : "outline"} onClick={() => toggle(role)}>{selected.has(role) && <Check />}{workerRoleLabel(role, t)}</Button>)}
+        {value.filter((role) => !CARBON_BUILT_IN_ROLES.includes(role as typeof CARBON_BUILT_IN_ROLES[number])).map((role) => <Button key={role} type="button" size="xs" variant="secondary" onClick={() => toggle(role)}><Check />{role}</Button>)}
+      </div>
+      <div className="flex gap-2">
+        <Input value={custom} maxLength={80} onChange={(event) => setCustom(event.target.value)} className="h-8" placeholder={t("Custom role key, e.g. qa_lead", "自定义角色键，例如 qa_lead")} />
+        <Button type="button" size="sm" variant="outline" disabled={!customValid} onClick={() => { onChange([...value, normalizedCustom]); setCustom(""); }}><Plus />{t("Add", "添加")}</Button>
+      </div>
+    </div>
   );
 }
 

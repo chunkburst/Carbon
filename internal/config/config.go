@@ -55,6 +55,10 @@ type Config struct {
 	ReviewState         string   `yaml:"review_state,omitempty"`
 	SessionHeartbeat    int      `yaml:"session_heartbeat_interval,omitempty"`
 	SessionStaleAfter   int      `yaml:"session_stale_after,omitempty"`
+	// TaskStagnationAfter is the inactivity window, in seconds, before an open
+	// task is derived as stagnant. A zero/missing value keeps legacy config files
+	// compatible by resolving to the default day-long window.
+	TaskStagnationAfter int `yaml:"task_stagnation_after,omitempty"`
 	// TaskTypes are additive custom type definitions. Built-ins live in internal/types
 	// and are always accepted even when this list is absent in old config.yaml files.
 	TaskTypes                 []tasktypes.Definition `yaml:"task_types,omitempty"`
@@ -68,6 +72,12 @@ type Config struct {
 	// ownership guard. It intentionally defaults to false so existing projects and
 	// older config.yaml files retain their historical, unrestricted behaviour.
 	IdentityMode bool `yaml:"identity_mode,omitempty"`
+
+	// NoTraceMode suppresses only the automatic process Incident created for a
+	// material Worker-identity change. It never suppresses the durable identity
+	// audit record and it never affects human- or Agent-authored Incidents.
+	// Missing values intentionally remain false for existing projects.
+	NoTraceMode bool `yaml:"no_trace_mode,omitempty"`
 
 	// node retains the original frontmatter-level YAML representation when Config came
 	// from Load. Save merges known engine keys into this node so future/third-party keys
@@ -91,6 +101,7 @@ func Default(prefix string) Config {
 		ReviewState:               "in_review",
 		SessionHeartbeat:          30,
 		SessionStaleAfter:         180,
+		TaskStagnationAfter:       int(DefaultTaskStagnationDuration / time.Second),
 		TaskTypeMaxCustom:         tasktypes.DefaultMaxCustom,
 		TaskTypeCreateMinInterval: int(tasktypes.DefaultMinCreateInterval / time.Second),
 		TrashRetentionDays:        30,
@@ -199,19 +210,12 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 		return fmt.Errorf("config: inspect newly created atomic temp: %w", err)
 	}
 	defer func() {
-		if !published {
-			// Cleanup is identity-checked so a failed write never deletes an entry
-			// substituted at the randomized temp pathname.
-			// POSIX retains the descriptor through validation, so removing before Close
-			// also prevents an unlinked staging inode from being immediately reused.
-			if !atomicTempRequiresCloseBeforeReplace() {
-				_ = removeAtomicTempFile(tmpPath, tempIdentity)
-			}
-		}
 		if !closed {
 			_ = tmp.Close()
 		}
-		if !published && atomicTempRequiresCloseBeforeReplace() {
+		if !published {
+			// Cleanup is identity-checked so a failed write never deletes an entry
+			// substituted at the randomized temp pathname.
 			_ = removeAtomicTempFile(tmpPath, tempIdentity)
 		}
 	}()
@@ -227,12 +231,10 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 	if err := tmp.Sync(); err != nil {
 		return fmt.Errorf("config: sync atomic temp: %w", err)
 	}
-	if atomicTempRequiresCloseBeforeReplace() {
-		if err := tmp.Close(); err != nil {
-			return fmt.Errorf("config: close atomic temp: %w", err)
-		}
-		closed = true
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("config: close atomic temp: %w", err)
 	}
+	closed = true
 
 	// Recheck immediately before publication. Rename replaces a final directory entry
 	// rather than following it, and this makes an introduced symlink/reparse point a
@@ -252,12 +254,6 @@ func atomicWriteWithDurability(path string, data []byte, replace func(from, to s
 		return fmt.Errorf("config: atomically replace %s: %w", path, err)
 	}
 	published = true
-	if !closed {
-		if err := tmp.Close(); err != nil {
-			return fmt.Errorf("%w: close published atomic temp %s: %w", ErrConfigWritePublished, path, err)
-		}
-		closed = true
-	}
 	if err := validateAtomicRegularFile(path, false); err != nil {
 		return fmt.Errorf("%w: verify published entry %s: %w", ErrConfigWritePublished, path, err)
 	}
@@ -399,8 +395,9 @@ func render(c Config) ([]byte, error) {
 var configKeys = []string{
 	"project_id", "prefix", "counter", "states", "closed", "initial", "check_timeout_default",
 	"check_shell", "working_state", "review_state", "session_heartbeat_interval",
-	"session_stale_after", "task_types", "task_type_max_custom",
+	"session_stale_after", "task_stagnation_after", "task_types", "task_type_max_custom",
 	"task_type_create_min_interval", "trash_retention_days", "identity_mode",
+	"no_trace_mode",
 }
 
 func mapping(node *yaml.Node) *yaml.Node {
@@ -483,6 +480,9 @@ func (c Config) Validate() error {
 	if c.TrashRetentionDays < 0 {
 		return fmt.Errorf("%w: trash_retention_days cannot be negative", ErrInvalidConfig)
 	}
+	if c.TaskStagnationAfter < 0 || c.TaskStagnationAfter > MaxTaskStagnationAfterSeconds {
+		return fmt.Errorf("%w: task_stagnation_after must be between 0 and %d seconds", ErrInvalidConfig, MaxTaskStagnationAfterSeconds)
+	}
 	return nil
 }
 
@@ -542,6 +542,25 @@ func (c Config) SessionHeartbeatDuration() time.Duration {
 	seconds := c.SessionHeartbeat
 	if seconds <= 0 {
 		seconds = 30
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// DefaultTaskStagnationDuration is the compatibility default for projects that
+// predate the task_stagnation_after setting.
+const DefaultTaskStagnationDuration = 24 * time.Hour
+
+// MaxTaskStagnationAfterSeconds is a year: long enough for intentionally parked work
+// while rejecting accidental unit mistakes such as a seconds field supplied in milliseconds.
+const MaxTaskStagnationAfterSeconds = int((365 * 24 * time.Hour) / time.Second)
+
+// TaskStagnationDuration returns the open-task inactivity window. Zero intentionally
+// means the default so old config.yaml files retain the new health behavior without a
+// migration write.
+func (c Config) TaskStagnationDuration() time.Duration {
+	seconds := c.TaskStagnationAfter
+	if seconds <= 0 {
+		return DefaultTaskStagnationDuration
 	}
 	return time.Duration(seconds) * time.Second
 }

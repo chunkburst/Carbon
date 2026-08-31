@@ -234,7 +234,7 @@ func TestStatusThenInit(t *testing.T) {
 	}
 	// Status now carries the config states for the board.
 	call(t, h, "GET", "/api/status", "", &st)
-	if len(st.States) == 0 || st.Initial != "backlog" {
+	if len(st.States) == 0 || st.Initial != "backlog" || st.TaskStagnationAfterSeconds != 24*60*60 {
 		t.Fatalf("status missing config: %+v", st)
 	}
 }
@@ -459,6 +459,40 @@ func TestListIncludesUpdatedAt(t *testing.T) {
 	call(t, h, "GET", "/api/tasks", "", &list)
 	if list.Tasks[0].UpdatedAt < first {
 		t.Fatalf("updatedAt regressed: %q < %q", list.Tasks[0].UpdatedAt, first)
+	}
+}
+
+func TestTaskActivityHealthIsConsistentAcrossHTTPTaskReads(t *testing.T) {
+	_, h := newServer(t)
+	var st statusResp
+	call(t, h, "POST", "/api/init", `{"prefix":"WEB"}`, &st)
+
+	var created taskDTO
+	call(t, h, "POST", "/api/tasks", `{"title":"activity projection"}`, &created)
+	if created.ActivityHealth != mcp.ActivityHealthFresh || created.LastMeaningfulAt == "" || created.StagnantAt == "" {
+		t.Fatalf("create activity health = %+v", created)
+	}
+
+	var list struct {
+		Tasks []taskDTO `json:"tasks"`
+	}
+	call(t, h, "GET", "/api/tasks", "", &list)
+	if len(list.Tasks) != 1 || list.Tasks[0].ActivityHealth != created.ActivityHealth || list.Tasks[0].LastMeaningfulAt != created.LastMeaningfulAt || list.Tasks[0].StagnantAt != created.StagnantAt {
+		t.Fatalf("ordinary list activity = %+v, want %+v", list.Tasks, created)
+	}
+
+	var market struct {
+		Tasks []taskDTO `json:"tasks"`
+	}
+	call(t, h, "GET", "/api/tasks?market_history=true", "", &market)
+	if len(market.Tasks) != 1 || market.Tasks[0].ActivityHealth != created.ActivityHealth || market.Tasks[0].LastMeaningfulAt != created.LastMeaningfulAt || market.Tasks[0].StagnantAt != created.StagnantAt {
+		t.Fatalf("market history activity = %+v, want %+v", market.Tasks, created)
+	}
+
+	var detail taskDTO
+	call(t, h, "GET", "/api/tasks/"+created.ID, "", &detail)
+	if detail.ActivityHealth != created.ActivityHealth || detail.LastMeaningfulAt != created.LastMeaningfulAt || detail.StagnantAt != created.StagnantAt {
+		t.Fatalf("detail activity = %+v, want %+v", detail, created)
 	}
 }
 

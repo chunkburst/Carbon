@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Settings2 } from "lucide-react";
+import { toast } from "sonner";
 import type { CatalogIconMutation } from "@/components/CatalogIcon";
 import { FirstProjectWizard } from "@/components/FirstProjectWizard";
 import { ProjectManagementPage, ProjectManagerDialog } from "@/components/ProjectManagerDialog";
@@ -16,7 +17,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { CarbonWorkspace } from "@/pages/CarbonWorkspace";
 
-type CarbonWorkspaceView = "board" | "graph" | "workers" | "work-logs" | "owner-logs" | "trash";
+type CarbonWorkspaceView = "board" | "graph" | "workers" | "work-logs" | "owner-logs" | "incidents" | "reviews" | "trash";
 
 type HomeRoute = {
   view?: CarbonWorkspaceView | "manage";
@@ -64,7 +65,11 @@ function parseRoute(): HomeRoute {
     : tail === "workers" || tail === "worker"
       ? "workers"
       : tail === "work-logs"
-        ? "work-logs"
+      ? "work-logs"
+      : tail === "incidents"
+        ? "incidents"
+        : tail === "reviews"
+          ? "reviews"
     : tail === "owner-logs"
           ? "owner-logs"
           : tail === "trash"
@@ -197,7 +202,7 @@ export function HomeShell({ initialHome, suggestedActor }: { initialHome?: strin
     if (destination) navigate({ ...destination }, true);
   }, [clusters, currentSelection, data?.initialized, hasProjects, homeId, projects, route.view]);
 
-  const openProject = (selection: ProjectSelection) => {
+  const openProject = async (selection: ProjectSelection) => {
     setManagerOpen(false);
     // Selecting a project closes the manager, so it is also a safe boundary for a
     // catalog update that arrived while its draft was open.
@@ -207,6 +212,19 @@ export function HomeShell({ initialHome, suggestedActor }: { initialHome?: strin
     // deliberately omit task/worker route detail so an id from the previous
     // project can never remain selected against the new scope.
     const view: CarbonWorkspaceView = route.view && route.view !== "manage" ? route.view : "board";
+    if (!findProject(clusters, projects, selection)) {
+      // A just-created project has a stable id before the Home observer necessarily
+      // renders its refreshed catalog. Confirm that id against fresh authority before
+      // navigation so the launch-route fallback cannot restore the previous project.
+      const refreshed = await homeQuery.refetch();
+      const refreshedHome = refreshed.data?.available ? refreshed.data.data : undefined;
+      const refreshedClusters = refreshedHome?.manifest?.clusters ?? [];
+      const refreshedProjects = refreshedHome?.manifest?.projects ?? [];
+      if (!findProject(refreshedClusters, refreshedProjects, selection)) {
+        toast.error(t("The new project was saved, but Carbon could not open it yet. Reopen the project list and try again.", "新项目已经保存，但 Carbon 暂时无法打开它；请重新打开项目列表后再试。"));
+        return;
+      }
+    }
     navigate({ ...selection, view });
   };
 

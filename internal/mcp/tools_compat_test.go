@@ -71,7 +71,8 @@ func TestToolRegistrationUsesCompatibilityAndScopeBoundary(t *testing.T) {
 		"trash", "trash_many", "list_trash", "restore_trash", "bulk_update", "bulk_move",
 		"list_views", "list_templates", "worker_stats", "set_blocker", "add_evidence", "remove_evidence",
 		"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete", "worklog_draft_send",
-		"worker_identity_list", "worker_identity_get", "worker_identity_claim")
+		"worker_identity_list", "worker_identity_get", "worker_identity_claim",
+		"subscription_initialize", "events_poll")
 
 	carbonRoot := t.TempDir()
 	if err := repo.InitDataRoot(carbonRoot, "CAR"); err != nil {
@@ -85,7 +86,8 @@ func TestToolRegistrationUsesCompatibilityAndScopeBoundary(t *testing.T) {
 		"lease_claim",
 		"set_blocker", "add_evidence", "remove_evidence",
 		"worklog_create", "worklog_get", "worklog_list", "worklog_update", "worklog_delete", "worklog_draft_send",
-		"worker_identity_list", "worker_identity_get", "worker_identity_claim")
+		"worker_identity_list", "worker_identity_get", "worker_identity_claim",
+		"subscription_initialize", "events_poll")
 	rejectTools(t, carbonTools, "claim")
 
 	homeRoot := t.TempDir()

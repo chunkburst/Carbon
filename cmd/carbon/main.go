@@ -89,7 +89,7 @@ func run(args []string) error {
 	}
 }
 
-const usageText = `Carbon V1.0.0 — local task coordination
+const usageText = `Carbon V1.1.2 — local task coordination
 
   carbon init  [--prefix PROJ] [--repo .]            scaffold .carbon/ in a project
   carbon home init [--home PATH]                     initialize a Carbon home

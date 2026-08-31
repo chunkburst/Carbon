@@ -11,10 +11,13 @@ import (
 
 	"carbon/internal/compat"
 	"carbon/internal/home"
+	"carbon/internal/incident"
 	"carbon/internal/lease"
+	"carbon/internal/review"
 	"carbon/internal/search"
 	"carbon/internal/stats"
 	"carbon/internal/store"
+	"carbon/internal/subscription"
 	"carbon/internal/task"
 	"carbon/internal/templates"
 	"carbon/internal/trash"
@@ -33,6 +36,8 @@ var (
 const serverInstructions = `Use identity first. It returns this connection's fixed actor, resolved scope, compatibility contract, and (when bindingMode=session) selectionVersion. A fixed/pinned connection never changes scope: create_project only creates catalog metadata there, so reconnect with another --project or use a Project Session when work must move. A Carbon Project Session starts at a Home catalog with no active project: use select_project (project required, cluster optional) to choose one project; create_project automatically selects its successful result only in Session mode. Until selection, every task, session, and Work Log tool returns active-project-required and never falls back to the Home directory.
 
 Carbon v2 is the approved stable layer. A project-bound connection reads and writes only its bound project by default; include_cluster=true is an explicit same-cluster read expansion and never expands writes or crosses clusters. Read the current record before a write and pass its raw version or quoted ETag as expected_version whenever a tool marks it required; stale writes are rejected.
+
+Event subscriptions are selected-project, Agent-owned delivery preferences, not project configuration. Use subscription_initialize for task result events and Incident process events, then retain the returned cursor and use events_poll after restart. passive, mixed, and active currently all return effectiveDelivery=poll with pushSupported=false: this MCP session has no verified automatic-wake transport. A cursor is bound to its project, actor, and subscription; after a project switch or retention expiry, explicitly reinitialize with a new idempotency key.
 
 set_blocker, add_evidence, remove_evidence, and lease_claim require expected_version. Carbon v2 ownership uses lease_claim with a non-empty reason and current expected_version; the historical claim tool is registered only for frozen legacy v1. When a project enables Identity Mode, claim a worker identity with allowed task types before lease_claim or begin on a typed task; human/system actors and older untyped tasks remain compatible. Blocker text remains until explicitly cleared. Evidence is a server-audited task proof. Work Logs are separate durable Worker records: worker_private is isolated to its Worker, project_public follows the bound project/cluster scope, and global_public is readable only within the same Carbon home. Identity Mode additionally permits append-only worklog_draft_send server-owned identity-draft coordination records in the same project: named recipients are an exact Agent allow-list, while an empty recipient list broadcasts to that project; ordinary worker_private logs never become visible to peers.
 
@@ -219,6 +224,7 @@ func newServer(svc *Service, projectSession *ProjectSession) *mcpsdk.Server {
 						Deps: v.Deps, Ready: v.Ready, UpdatedAt: v.UpdatedAt, Rank: v.Rank,
 						Labels: v.Labels, Priority: v.Priority, Parent: v.Parent, ActiveAttempt: v.ActiveAttempt,
 						Lease: v.Lease, PendingClaims: v.PendingClaims, ExecutionState: v.ExecutionState, SessionID: v.SessionID,
+						ActivityHealth: v.Health, LastMeaningfulAt: v.LastMeaningfulAt, StagnantAt: v.StagnantAt,
 						BlockerReason: v.BlockerReason, Evidence: v.Evidence, Checks: toCheckOut(v.Checks)})
 				}
 				return nil, out, nil
@@ -434,23 +440,108 @@ func newServer(svc *Service, projectSession *ProjectSession) *mcpsdk.Server {
 	// explicit include_cluster opt-in broadens reads within the current cluster.
 	if carbonStableTasks {
 		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "worker_identity_list",
-			Description: "Carbon v2 stable read: list this selected project or shared-cluster's Worker identity records and whether Identity Mode is enabled. Reading is safe while disabled; records are retained for a later re-enable."},
+			Description: "Carbon v2 stable read: list this selected project's Worker identity records and whether Identity Mode is enabled. Reading is safe while disabled; records are retained for a later re-enable."},
 			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, WorkerIdentitySnapshot, error) {
 				out, err := svc.ListWorkerIdentities()
 				return nil, out, err
 			})
 
 		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "worker_identity_get",
-			Description: "Carbon v2 stable read: get one canonical agent Worker identity in this selected project or shared cluster. actor is required and no task ownership changes."},
+			Description: "Carbon v2 stable read: get one canonical agent Worker identity in this selected project. actor is required and no task ownership changes."},
 			func(_ context.Context, _ *mcpsdk.CallToolRequest, in workerIdentityGetIn) (*mcpsdk.CallToolResult, WorkerIdentityResult, error) {
 				out, err := svc.GetWorkerIdentity(in.Actor)
 				return nil, out, err
 			})
 
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "worker_identity_audit_list",
+			Description: "Carbon v2 stable read: list append-only Worker identity claim/change audits for this selected project. Audits remain visible even when Identity Mode enforcement is currently disabled."},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, WorkerIdentityAuditSnapshot, error) {
+				out, err := svc.ListWorkerIdentityAudit()
+				return nil, out, err
+			})
+
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "subscription_initialize",
+			Description: "Carbon v2 stable write: create or deliberately update this Agent's selected-project event subscription for result-oriented tasks and process-oriented Incidents. passive, mixed, and active currently deliver by durable events_poll only: pushSupported is false until this MCP session has a verified push capability. Repeating the same idempotency_key and exact request is safe; changing an existing subscription requires expected_version and a new key."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in subscriptionInitializeIn) (*mcpsdk.CallToolResult, subscription.InitializeResult, error) {
+				out, err := svc.InitializeEventSubscription(ctx, subscription.InitializeInput{
+					SubscriptionID: in.SubscriptionID, IdempotencyKey: in.IdempotencyKey, ExpectedVersion: in.ExpectedVersion,
+					Mode: subscription.Mode(in.Mode), Modules: toSubscriptionModules(in.Modules),
+					Tasks:     subscription.TaskFilter{Statuses: append([]string(nil), in.TaskFilters.Statuses...), Types: append([]string(nil), in.TaskFilters.Types...), Importances: append([]string(nil), in.TaskFilters.Importances...)},
+					Incidents: subscription.IncidentFilter{Statuses: append([]string(nil), in.IncidentFilters.Statuses...), Severities: append([]string(nil), in.IncidentFilters.Severities...), Kinds: append([]string(nil), in.IncidentFilters.Kinds...)},
+				})
+				return nil, out, err
+			})
+
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "events_poll",
+			Description: "Carbon v2 stable read: durably poll this Agent's selected-project subscription cursor. It returns safe event summaries only, never task/Incident bodies or discussion text. cursor is project/actor/subscription-bound; an expired slow cursor must be explicitly resynchronized through subscription_initialize. wait_ms is bounded to 30000 and does not claim push delivery."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in eventsPollIn) (*mcpsdk.CallToolResult, subscription.PollResult, error) {
+				if in.WaitMS > 30_000 {
+					return nil, subscription.PollResult{}, fmt.Errorf("events_poll wait_ms must be between 0 and 30000")
+				}
+				out, err := svc.PollEventSubscription(ctx, subscription.PollInput{SubscriptionID: in.SubscriptionID, Cursor: in.Cursor, Limit: in.Limit, Wait: time.Duration(in.WaitMS) * time.Millisecond})
+				return nil, out, err
+			})
+
 		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "worker_identity_claim",
-			Description: "Carbon v2 stable write: claim or change this connection Agent's role and one or more allowed task types. Identity Mode must be enabled. The first claim may omit reason; a later role/type change requires a non-empty reason."},
+			Description: "Carbon v2 stable write: claim or change this connection Agent's one-or-more stable role keys and allowed task types. Identity Mode must be enabled for Agent self-service. The first claim may omit reason; a material later change requires a non-empty reason."},
 			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in workerIdentityClaimIn) (*mcpsdk.CallToolResult, WorkerIdentityResult, error) {
-				out, err := svc.ClaimWorkerIdentity(ctx, WorkerIdentityClaimInput{Role: in.Role, Types: append([]string(nil), in.Types...), Reason: in.Reason})
+				out, err := svc.ClaimWorkerIdentity(ctx, WorkerIdentityClaimInput{Roles: append([]string(nil), in.Roles...), Role: in.Role, Types: append([]string(nil), in.Types...), Reason: in.Reason})
+				return nil, out, err
+			})
+
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "incident_list",
+			Description: "Carbon v2 stable read: list project-scoped Incidents. An Incident records process, investigation, or an odd ongoing event; a task records a required result. Reading never changes task activity or market history."},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, incidentsOut, error) {
+				items, err := svc.ListIncidents()
+				return nil, incidentsOut{Incidents: items}, err
+			})
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "incident_get",
+			Description: "Carbon v2 stable read: get one project-scoped Incident with its append-only discussion replies. Use this for process context, not task ownership or task completion."},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, in incidentIDIn) (*mcpsdk.CallToolResult, incident.Incident, error) {
+				out, err := svc.GetIncident(in.ID)
+				return nil, out, err
+			})
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "incident_create",
+			Description: "Carbon v2 stable write: record a project-scoped process Incident (sudden, long_running, investigation, other, or a valid custom kind). This is intentionally separate from a result-oriented task and does not create task provenance."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in incidentCreateIn) (*mcpsdk.CallToolResult, incident.Incident, error) {
+				out, err := svc.CreateIncident(ctx, incident.CreateInput{Kind: incident.Kind(in.Kind), RelatedTaskIDs: append([]string(nil), in.RelatedTaskIDs...), Title: in.Title, Body: in.Body, Severity: incident.Severity(in.Severity)})
+				return nil, out, err
+			})
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "incident_reply",
+			Description: "Carbon v2 stable write: append a discussion reply to an Incident. The same Agent may ask and later answer its own investigation; replies do not count as task progress."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in incidentReplyIn) (*mcpsdk.CallToolResult, incident.Reply, error) {
+				out, err := svc.ReplyIncident(ctx, in.ID, in.Body)
+				return nil, out, err
+			})
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "incident_update",
+			Description: "Carbon v2 stable write: update only an Incident lifecycle (open, investigating, resolved, closed). It does not alter any linked task state, lease, or activity history."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in incidentUpdateIn) (*mcpsdk.CallToolResult, incident.Incident, error) {
+				out, err := svc.UpdateIncidentLifecycle(ctx, in.ID, incident.UpdateInput{Status: incident.Status(in.Status)})
+				return nil, out, err
+			})
+
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "review_list",
+			Description: "Carbon v2 stable read: list explicit project review targets. These plan/manual-check reviews are independent from task lease approval and pending claims."},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, reviewsOut, error) {
+				items, err := svc.ListReviewTargets()
+				return nil, reviewsOut{Reviews: items}, err
+			})
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "review_get",
+			Description: "Carbon v2 stable read: get one explicit plan or manual-check review target."},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, in reviewIDIn) (*mcpsdk.CallToolResult, review.Target, error) {
+				out, err := svc.GetReviewTarget(in.ID)
+				return nil, out, err
+			})
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "review_create",
+			Description: "Carbon v2 stable write: create an explicit review target and assign one reviewer. When Identity Mode is enabled, an Agent reviewer must hold the reviewer role; this never uses lease approval."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in reviewCreateIn) (*mcpsdk.CallToolResult, review.Target, error) {
+				out, err := svc.CreateReviewTarget(ctx, review.CreateInput{TargetKind: review.TargetKind(in.TargetKind), TargetID: in.TargetID, TaskID: in.TaskID, CheckID: in.CheckID, ReviewerActor: in.ReviewerActor})
+				return nil, out, err
+			})
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{Name: "review_decide",
+			Description: "Carbon v2 stable write: the assigned reviewer decides approved or rejected with a non-empty decision. Human/system control-plane actors may explicitly manage an assignment; ordinary Agents cannot decide a peer's target."},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in reviewDecideIn) (*mcpsdk.CallToolResult, review.Target, error) {
+				out, err := svc.DecideReviewTarget(ctx, in.ID, review.DecideInput{Status: review.Status(in.Status), Decision: in.Decision})
 				return nil, out, err
 			})
 
@@ -837,9 +928,95 @@ type workerIdentityGetIn struct {
 }
 
 type workerIdentityClaimIn struct {
-	Role   string   `json:"role" jsonschema:"required durable Worker role, for example 架构师"`
+	Roles  []string `json:"roles,omitempty" jsonschema:"one or more stable machine role keys, for example [frontend,backend] or [reviewer]"`
+	Role   string   `json:"role,omitempty" jsonschema:"legacy primary-role alias; use roles for new callers"`
 	Types  []string `json:"types" jsonschema:"required one or more current task type keys this Worker may claim"`
 	Reason string   `json:"reason,omitempty" jsonschema:"required when changing an existing role or type assignment"`
+}
+
+type subscriptionTaskFiltersIn struct {
+	Statuses    []string `json:"statuses,omitempty" jsonschema:"optional task status allow-list; empty means all"`
+	Types       []string `json:"types,omitempty" jsonschema:"optional task type allow-list; empty means all"`
+	Importances []string `json:"importances,omitempty" jsonschema:"optional task importance allow-list; empty means all"`
+}
+
+type subscriptionIncidentFiltersIn struct {
+	Statuses   []string `json:"statuses,omitempty" jsonschema:"optional Incident lifecycle allow-list; empty means all"`
+	Severities []string `json:"severities,omitempty" jsonschema:"optional Incident severity allow-list; empty means all"`
+	Kinds      []string `json:"kinds,omitempty" jsonschema:"optional Incident kind allow-list; empty means all"`
+}
+
+type subscriptionInitializeIn struct {
+	SubscriptionID  string                        `json:"subscription_id" jsonschema:"stable caller-chosen subscription id"`
+	IdempotencyKey  string                        `json:"idempotency_key" jsonschema:"stable request key; same key must carry the identical request"`
+	ExpectedVersion *uint64                       `json:"expected_version,omitempty" jsonschema:"current subscription version, required only when changing an existing subscription"`
+	Mode            string                        `json:"mode" jsonschema:"passive|mixed|active; all currently use durable polling"`
+	Modules         []string                      `json:"modules" jsonschema:"one or both of tasks,incidents"`
+	TaskFilters     subscriptionTaskFiltersIn     `json:"task_filters,omitempty" jsonschema:"task-only filters"`
+	IncidentFilters subscriptionIncidentFiltersIn `json:"incident_filters,omitempty" jsonschema:"Incident-only filters"`
+}
+
+type eventsPollIn struct {
+	SubscriptionID string `json:"subscription_id" jsonschema:"stable subscription id"`
+	Cursor         string `json:"cursor,omitempty" jsonschema:"previous cursor returned by subscription_initialize or events_poll"`
+	Limit          int    `json:"limit,omitempty" jsonschema:"1-200 safe events; defaults to 50"`
+	WaitMS         int    `json:"wait_ms,omitempty" jsonschema:"0-30000 long-poll milliseconds; no push delivery is implied"`
+}
+
+func toSubscriptionModules(items []string) []subscription.Module {
+	out := make([]subscription.Module, len(items))
+	for index, item := range items {
+		out[index] = subscription.Module(item)
+	}
+	return out
+}
+
+type incidentIDIn struct {
+	ID string `json:"id" jsonschema:"project-scoped incident id"`
+}
+
+type incidentCreateIn struct {
+	Kind           string   `json:"kind,omitempty" jsonschema:"built-in sudden|long_running|investigation|other or a valid future custom machine key"`
+	RelatedTaskIDs []string `json:"related_task_ids,omitempty" jsonschema:"optional existing task ids in the selected project; this links context only and never creates task progress"`
+	Title          string   `json:"title" jsonschema:"required concise process/event title"`
+	Body           string   `json:"body,omitempty" jsonschema:"optional investigation context"`
+	Severity       string   `json:"severity,omitempty" jsonschema:"info|low|normal|high|urgent; defaults to normal"`
+}
+
+type incidentReplyIn struct {
+	ID   string `json:"id" jsonschema:"incident id"`
+	Body string `json:"body" jsonschema:"required append-only discussion reply"`
+}
+
+type incidentUpdateIn struct {
+	ID     string `json:"id" jsonschema:"incident id"`
+	Status string `json:"status" jsonschema:"open|investigating|resolved|closed"`
+}
+
+type incidentsOut struct {
+	Incidents []incident.Incident `json:"incidents"`
+}
+
+type reviewIDIn struct {
+	ID string `json:"id" jsonschema:"project-scoped review target id"`
+}
+
+type reviewCreateIn struct {
+	TargetKind    string `json:"target_kind" jsonschema:"plan|manual_check"`
+	TargetID      string `json:"target_id" jsonschema:"required target identifier"`
+	TaskID        string `json:"task_id,omitempty" jsonschema:"optional existing task id in the selected project"`
+	CheckID       string `json:"check_id,omitempty" jsonschema:"optional check metadata id"`
+	ReviewerActor string `json:"reviewer_actor" jsonschema:"required explicitly assigned agent/human/system reviewer"`
+}
+
+type reviewDecideIn struct {
+	ID       string `json:"id" jsonschema:"review target id"`
+	Status   string `json:"status" jsonschema:"approved|rejected"`
+	Decision string `json:"decision" jsonschema:"required concise reviewer decision"`
+}
+
+type reviewsOut struct {
+	Reviews []review.Target `json:"reviews"`
 }
 
 type includeClusterIn struct {
@@ -1174,31 +1351,34 @@ type taskTypeOut struct {
 }
 
 type taskOut struct {
-	ID             string              `json:"id"`
-	Title          string              `json:"title"`
-	Status         string              `json:"status"`
-	Assignee       string              `json:"assignee,omitempty"`
-	ProjectID      string              `json:"projectId,omitempty"`
-	Type           string              `json:"type,omitempty"`
-	Importance     string              `json:"importance,omitempty"`
-	Version        string              `json:"version,omitempty"`
-	Deps           []string            `json:"deps,omitempty"`
-	Ready          bool                `json:"ready"`
-	UpdatedAt      string              `json:"updatedAt,omitempty"`
-	Rank           float64             `json:"rank,omitempty"`
-	Labels         []string            `json:"labels,omitempty"`
-	Priority       string              `json:"priority,omitempty"`
-	Parent         string              `json:"parent,omitempty"`
-	BlockerReason  string              `json:"blockerReason,omitempty"`
-	Evidence       []task.Evidence     `json:"evidence,omitempty"`
-	ActiveAttempt  string              `json:"activeAttempt,omitempty"`
-	Lease          *task.Lease         `json:"lease,omitempty"`
-	PendingClaims  []task.ClaimRequest `json:"pendingClaims,omitempty"`
-	ExecutionState string              `json:"executionState,omitempty"`
-	SessionID      string              `json:"sessionId,omitempty"`
-	Checks         []checkOut          `json:"checks,omitempty"`
-	Provenance     []store.Provenance  `json:"provenance,omitempty"`
-	Body           string              `json:"body,omitempty"`
+	ID               string              `json:"id"`
+	Title            string              `json:"title"`
+	Status           string              `json:"status"`
+	Assignee         string              `json:"assignee,omitempty"`
+	ProjectID        string              `json:"projectId,omitempty"`
+	Type             string              `json:"type,omitempty"`
+	Importance       string              `json:"importance,omitempty"`
+	Version          string              `json:"version,omitempty"`
+	Deps             []string            `json:"deps,omitempty"`
+	Ready            bool                `json:"ready"`
+	UpdatedAt        string              `json:"updatedAt,omitempty"`
+	Rank             float64             `json:"rank,omitempty"`
+	Labels           []string            `json:"labels,omitempty"`
+	Priority         string              `json:"priority,omitempty"`
+	Parent           string              `json:"parent,omitempty"`
+	BlockerReason    string              `json:"blockerReason,omitempty"`
+	Evidence         []task.Evidence     `json:"evidence,omitempty"`
+	ActiveAttempt    string              `json:"activeAttempt,omitempty"`
+	Lease            *task.Lease         `json:"lease,omitempty"`
+	PendingClaims    []task.ClaimRequest `json:"pendingClaims,omitempty"`
+	ExecutionState   string              `json:"executionState,omitempty"`
+	SessionID        string              `json:"sessionId,omitempty"`
+	ActivityHealth   string              `json:"activityHealth"`
+	LastMeaningfulAt string              `json:"lastMeaningfulAt,omitempty"`
+	StagnantAt       string              `json:"stagnantAt,omitempty"`
+	Checks           []checkOut          `json:"checks,omitempty"`
+	Provenance       []store.Provenance  `json:"provenance,omitempty"`
+	Body             string              `json:"body,omitempty"`
 }
 
 type checkOut struct {
@@ -1216,11 +1396,13 @@ func (svc *Service) view(doc *store.Doc) taskOut {
 		updatedAt = doc.Provenance[n-1].At
 	}
 	executionState, sessionID := svc.executionForTask(doc.Task)
+	activity := svc.ActivityOf(doc)
 	return taskOut{ID: doc.Task.ID, Title: doc.Task.Title, Status: doc.Task.Status,
 		Assignee: doc.Task.Assignee, ProjectID: doc.Task.ProjectID, Type: doc.Task.Type, Importance: doc.Task.Importance, Version: doc.Version(),
 		Deps: doc.Task.Deps, Ready: svc.ReadyOf(doc.Task),
 		UpdatedAt: updatedAt, Rank: doc.Task.Rank, Labels: doc.Task.Labels, Priority: doc.Task.Priority,
 		Parent: doc.Task.Parent, BlockerReason: doc.Task.BlockerReason, Evidence: doc.Task.Evidence, ActiveAttempt: doc.Task.ActiveAttempt, ExecutionState: executionState,
+		ActivityHealth: activity.Health, LastMeaningfulAt: activity.LastMeaningfulAt, StagnantAt: activity.StagnantAt,
 		Lease: doc.Task.Lease, PendingClaims: doc.Task.PendingClaims, SessionID: sessionID, Checks: toCheckOut(doc.Task.Checks), Provenance: doc.Provenance, Body: doc.Body}
 }
 

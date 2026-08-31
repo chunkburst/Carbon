@@ -3,6 +3,8 @@ import { Activity, ClipboardList, Clock3, Gauge, History, ListChecks, RefreshCw,
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { WorkerIdentityManagerDialog } from "@/components/WorkerIdentityManagerDialog";
 import {
   Card,
   CardAction,
@@ -19,12 +21,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkLogDetailsDialog } from "@/components/WorkLogDetailsDialog";
 import { WorkLogTable } from "@/components/WorkLogTable";
 import { recentWorkTaskNavigationTarget, type TaskNavigationTarget, type WorkLog } from "@/components/WorkLogTypes";
-import type { CarbonHomeCluster, CarbonScopeInput, CarbonWorkerIdentity, CarbonWorkerMetric, CarbonWorkerRecentWork } from "@/lib/carbon-api";
+import type { CarbonHomeCluster, CarbonScope, CarbonScopeInput, CarbonWorkerIdentity, CarbonWorkerMetric, CarbonWorkerRecentWork } from "@/lib/carbon-api";
 import { useCarbonWorkLogs, useCarbonWorkerIdentities, useWorkerAliases, useWorkerMetrics } from "@/lib/queries";
 import { useI18n } from "@/lib/i18n";
 import { carbonTaskTypeLabel } from "@/lib/task-labels";
 import { cn, initials, timeAgo } from "@/lib/utils";
 import { formatWorkerActor } from "@/lib/worker-aliases";
+import { workerRoleLabel } from "@/lib/worker-roles";
 
 export type OwnerLogsProps = {
   home?: string;
@@ -62,14 +65,11 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
       ...(projectId ? { projectId } : {}),
     };
   }, [carbonBase?.clusterId, carbonBase?.projectId]);
-  const identityScope = useMemo<CarbonScopeInput>(() => {
-    if (!carbonBase) return carbonScope ?? "";
-    if (carbonBase.home && carbonBase.clusterId) return { home: carbonBase.home, clusterId: carbonBase.clusterId };
-    if (carbonBase.home && carbonBase.projectId) return { home: carbonBase.home, projectId: carbonBase.projectId };
-    return carbonBase;
-  }, [carbonBase, carbonScope]);
+  const identityScope = useMemo<CarbonScope | undefined>(() => carbonBase?.home && carbonBase.projectId
+    ? { home: carbonBase.home, clusterId: carbonBase.clusterId, projectId: carbonBase.projectId }
+    : undefined, [carbonBase]);
   const metrics = useWorkerMetrics(statsScope, statsMode);
-  const identitiesQuery = useCarbonWorkerIdentities(identityScope, Boolean(identityScope));
+  const identitiesQuery = useCarbonWorkerIdentities(identityScope ?? "", Boolean(identityScope));
   const aliasesQuery = useWorkerAliases(resolvedHome);
   const logScope = useMemo<CarbonScopeInput>(() => {
     if (typeof carbonScope === "string") return carbonScope;
@@ -84,7 +84,7 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
   );
   const metric = useMemo(() => workers.find((worker) => worker.actor === actor), [actor, workers]);
   const identity = useMemo<CarbonWorkerIdentity | undefined>(
-    () => identitiesQuery.data?.available && identitiesQuery.data.data.modeEnabled
+    () => identitiesQuery.data?.available
       ? identitiesQuery.data.data.records?.find((record) => record.actor === actor)
       : undefined,
     [actor, identitiesQuery.data],
@@ -99,6 +99,7 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
     [logsQuery.data],
   );
   const [viewLog, setViewLog] = useState<WorkLog | null>(null);
+  const [identityOpen, setIdentityOpen] = useState(false);
 
   if (actor) {
     return (
@@ -107,7 +108,7 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
           <UsersRound className="size-4 shrink-0 text-brand" />
           <div className="min-w-0">
             <h1 className="text-sm font-semibold">{t("Agent profile", "智能体档案")}</h1>
-            <p className="truncate text-xs text-muted-foreground">{t("Execution agent, task activity, and work logs", "执行智能体、任务参与记录和工作日志")}</p>
+            <p className="truncate text-xs text-muted-foreground">{t("Responsibilities, work in progress, and records left behind", "看看它负责什么、正在推进什么，以及留下了哪些记录")}</p>
           </div>
         </header>
         <div className="min-w-0 flex-1 overflow-y-auto">
@@ -127,6 +128,7 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
               identityAvailable={identityAvailable}
               identityModeEnabled={identityModeEnabled}
               highestActiveLoad={highestActiveLoad}
+              onEditIdentity={identityScope ? () => setIdentityOpen(true) : undefined}
             />
 
             <Tabs defaultValue="work">
@@ -164,6 +166,7 @@ export function OwnerLogs({ home, carbonScope, actor, onOpenWorker, onOpenTask }
           </main>
         </div>
         <WorkLogDetailsDialog open={viewLog !== null} onOpenChange={(open) => !open && setViewLog(null)} log={viewLog} onOpenTask={onOpenTask} onOpenWorker={onOpenWorker} />
+        <WorkerIdentityManagerDialog open={identityOpen} onOpenChange={setIdentityOpen} scope={identityScope} actor={actor} />
       </div>
     );
   }
@@ -203,6 +206,7 @@ function WorkerProfileSummary({
   identityAvailable,
   identityModeEnabled,
   highestActiveLoad,
+  onEditIdentity,
 }: {
   actor: string;
   displayName: string;
@@ -211,6 +215,7 @@ function WorkerProfileSummary({
   identityAvailable: boolean;
   identityModeEnabled: boolean;
   highestActiveLoad: number;
+  onEditIdentity?: () => void;
 }) {
   const { t } = useI18n();
   const completed = metric?.completed ?? completedCount(metric?.completedByPriority ?? metric?.completed_by_priority);
@@ -231,8 +236,8 @@ function WorkerProfileSummary({
             <CardDescription className="truncate font-mono text-[10px]">{actor}</CardDescription>
           </div>
         </div>
-        <CardDescription>{t("This is an execution agent profile. Each task shows its own task lead.", "这是执行智能体档案；每个任务会单独显示负责人。")}</CardDescription>
-        <CardAction><IdentityStatus identity={identity} identityAvailable={identityAvailable} identityModeEnabled={identityModeEnabled} /></CardAction>
+        <CardDescription>{t("This page follows one Worker across task activity and Work Logs. A task lead is still set separately on each task.", "这里沿着一个 Worker 查看任务参与和工作日志；每项任务的负责人仍在任务里单独设置。")}</CardDescription>
+        <CardAction><div className="flex items-center gap-2"><IdentityStatus identity={identity} identityAvailable={identityAvailable} identityModeEnabled={identityModeEnabled} />{onEditIdentity && <Button size="sm" variant="outline" onClick={onEditIdentity}><ShieldCheck />{t("Identity", "身份与分工")}</Button>}</div></CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(15rem,0.85fr)]" aria-label={t("Agent role and workload", "智能体角色与工作负载")}>
@@ -266,9 +271,9 @@ function IdentityStatus({ identity, identityAvailable, identityModeEnabled }: {
 }) {
   const { t } = useI18n();
   if (!identityAvailable) return <Badge variant="outline">{t("Profile details unavailable", "身份信息暂不可用")}</Badge>;
-  if (!identityModeEnabled) return <Badge variant="outline">{t("Identity mode off", "身份模式未启用")}</Badge>;
+  if (!identityModeEnabled) return <Badge variant="outline">{t("Free collaboration", "自由协作")}</Badge>;
   if (!identity) return <Badge variant="outline">{t("Profile not set", "档案待设置")}</Badge>;
-  return <Badge variant="secondary">{identity.role}</Badge>;
+  return <Badge variant="secondary">{(identity.roles?.length ? identity.roles : [identity.role]).map((role) => workerRoleLabel(role, t)).join(" · ")}</Badge>;
 }
 
 function WorkerCapability({ identity, identityAvailable, identityModeEnabled }: {
@@ -285,11 +290,11 @@ function WorkerCapability({ identity, identityAvailable, identityModeEnabled }: 
       </div>
     );
   }
-  if (!identity || !identityModeEnabled) {
+  if (!identity) {
     return (
       <div className="flex flex-col gap-1.5">
         <span className="flex items-center gap-1.5 text-xs font-medium"><ShieldCheck className="size-3.5 text-muted-foreground" />{t("Role and task types", "角色与可接任务")}</span>
-        <p className="text-sm text-muted-foreground">{identityModeEnabled ? t("This agent has not set a role or task types yet.", "此智能体尚未设置角色或可接任务类型。") : t("Role mode is off, so this project does not limit which task types an agent can take.", "身份模式未启用，因此项目不会限制智能体可接手的任务类型。")}</p>
+        <p className="text-sm text-muted-foreground">{identityModeEnabled ? t("This Worker has not set its responsibilities yet.", "这个 Worker 还没有设置身份与任务类型。") : t("Free collaboration is on. You can still prepare an identity now; Carbon simply will not enforce it when tasks are claimed.", "当前是自由协作；仍可提前设置身份，只是认领任务时暂不按它限制。")}</p>
       </div>
     );
   }
@@ -297,10 +302,10 @@ function WorkerCapability({ identity, identityAvailable, identityModeEnabled }: 
     <div className="flex flex-col gap-2">
       <span className="flex items-center gap-1.5 text-xs font-medium"><ShieldCheck className="size-3.5 text-muted-foreground" />{t("Role and task types", "角色与可接任务")}</span>
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="secondary">{identity.role}</Badge>
+        {(identity.roles?.length ? identity.roles : [identity.role]).map((role) => <Badge key={role} variant="secondary">{workerRoleLabel(role, t)}</Badge>)}
         {identity.types.map((type) => <Badge key={type} variant="outline">{carbonTaskTypeLabel(type, t)}</Badge>)}
       </div>
-      <p className="text-[10px] text-muted-foreground">{t("When role mode is on, these task types are checked when work is taken over or handed off.", "启用身份模式后，接手或转交任务时会检查这些任务类型。")}</p>
+      <p className="text-[10px] text-muted-foreground">{identityModeEnabled ? t("Carbon checks these task types when work is claimed or handed off.", "接手或转交任务时，Carbon 会核对这些任务类型。") : t("Saved for this project; currently not enforced because free collaboration is on.", "这份分工已保存在项目中；当前自由协作模式下暂不强制。")}</p>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"carbon/internal/home"
+	"carbon/internal/projectpolicy"
 	"carbon/internal/store"
 	"carbon/internal/worklog"
 )
@@ -293,12 +294,7 @@ func TestWorkLogServiceListFiltersAcrossHome(t *testing.T) {
 
 func TestIdentityDraftsShareOnlyWithinTheirProjectAndStayAppendOnly(t *testing.T) {
 	fixture := newWorkLogFixture(t)
-	cfg, err := fixture.store1.Config()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.IdentityMode = true
-	if err := fixture.store1.SaveConfig(cfg); err != nil {
+	if _, err := projectpolicy.New(fixture.store1).Save(context.Background(), "human:lead", projectpolicy.Policy{Version: 1, ProjectID: fixture.project1.ID, IdentityMode: true}); err != nil {
 		t.Fatal(err)
 	}
 	owner := fixture.service(t, "agent:owner", fixture.cluster1, fixture.project1.ID)
@@ -386,8 +382,7 @@ func TestIdentityDraftsShareOnlyWithinTheirProjectAndStayAppendOnly(t *testing.T
 		t.Fatalf("empty-recipient broadcast = %#v err=%v", got, err)
 	}
 
-	cfg.IdentityMode = false
-	if err := fixture.store1.SaveConfig(cfg); err != nil {
+	if _, err := projectpolicy.New(fixture.store1).Save(context.Background(), "human:lead", projectpolicy.Policy{Version: 1, ProjectID: fixture.project1.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := peerSameProject.GetWorkLog(draft.ID); !errors.Is(err, ErrWorkLogNotVisible) {

@@ -28,7 +28,7 @@ var (
 const SchemaVersion = "carbon.snapshot/v1"
 
 // DefaultAppVersion is used when an integration does not inject its running app version.
-const DefaultAppVersion = "1.0.0"
+const DefaultAppVersion = "1.1.2"
 
 // FileEntry is one immutable regular file in a snapshot manifest.
 type FileEntry struct {

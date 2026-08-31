@@ -58,6 +58,8 @@ const ADMIN_DATA_HOME_ARG: &str = "--carbon-admin-data-home";
 
 /// Default global shortcut that pops the quick-capture window.
 const CAPTURE_SHORTCUT: &str = "CmdOrCtrl+Shift+K";
+/// Stable label for the single native picture-in-picture task board.  Keep this out of the
+/// persisted window-state cache: the scope is transient and is always supplied by the main UI.
 /// Full-page message shown if the bundled Carbon server never comes up. Self-contained
 /// so it works regardless of what the hidden webview had loaded.
 const STARTUP_ERROR_JS: &str = "document.open();document.write('<!doctype html><meta charset=utf-8><body style=\"margin:0;height:100vh;display:grid;place-items:center;font-family:ui-sans-serif,system-ui,sans-serif;background:radial-gradient(circle at 24% 12%,#2b3f78 0,transparent 38%),linear-gradient(135deg,#172136,#292d43 58%,#1c3942);color:#e7ecfa\"><div style=\"max-width:420px;padding:30px 34px;text-align:center;border:1px solid rgba(151,169,226,.24);border-radius:18px;background:rgba(47,54,78,.78);box-shadow:0 24px 70px rgba(8,15,30,.32)\"><div style=\"font-weight:650;letter-spacing:.03em;color:#aebcff\">Carbon</div><div style=\"font-size:13px;color:#d2daf0;margin-top:9px\">本地服务未能启动，请退出后重新打开 Carbon。</div><div style=\"font-size:12px;color:#9facc8;margin-top:5px\">Could not start the local server. Quit and reopen Carbon.</div></div></body>');document.close();";

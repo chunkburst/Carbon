@@ -290,6 +290,8 @@ function marketRegimeLabel(regime: MarketKlineScene["regime"], t: ReturnType<typ
       return t("Deliveries are lifting the market", "交付正在带动上涨");
     case "blocked":
       return t("Blockers are weighing on progress", "阻塞正在拖慢进度");
+    case "stagnant":
+      return t("Stagnant tasks are pressing the baseline", "停滞任务正在压低基准");
     case "all-active":
       return t("Work is moving on several fronts", "多项任务正在推进");
     default:
@@ -299,13 +301,14 @@ function marketRegimeLabel(regime: MarketKlineScene["regime"], t: ReturnType<typ
 
 function summaryLabel(summary: AnimationBoardSummary, t: ReturnType<typeof useI18n>["t"]): string {
   return t(
-    "{total} tasks: {active} working, {completed} completed, {blocked} blocked, {queued} waiting.",
-    "共 {total} 个任务：{active} 个工作中，{completed} 个已完成，{blocked} 个受阻，{queued} 个待处理。",
+    "{total} tasks: {active} working, {completed} completed, {blocked} blocked, {stagnant} stagnant, {queued} waiting.",
+    "共 {total} 个任务：{active} 个工作中，{completed} 个已完成，{blocked} 个受阻，{stagnant} 个停滞，{queued} 个待处理。",
     {
       total: summary.total,
       active: summary.active,
       completed: summary.completed,
       blocked: summary.blocked,
+      stagnant: summary.stagnant,
       queued: summary.queued,
     },
   );
@@ -366,6 +369,7 @@ function markerColor(marker: MarketTaskMarker, palette: ChartPalette): string {
     case "recovered":
       return palette.up;
     case "blocked":
+    case "stagnant":
       return palette.down;
     case "processing":
     case "claimed":
@@ -381,6 +385,8 @@ function marketMarkerPriority(marker: MarketTaskMarker): number {
   switch (marker.eventKind) {
     case "blocked":
       return 7;
+    case "stagnant":
+      return 8;
     case "recovered":
       return 6;
     case "completed":
@@ -425,20 +431,20 @@ function compressMarketVolume(energy: number): number {
   // Keep the raw energy in the readout. The pane is only a relative texture, so
   // lift quiet bars and tame the biggest bursts without flattening their order.
   const normalized = Math.min(1, Math.max(0, energy / 100));
-  return 12 + Math.pow(normalized, 0.56) * 52;
+  return 6 + Math.pow(normalized, 0.62) * 30;
 }
 
 const stableMarketAutoscaleInfo: AutoscaleInfoProvider = (baseImplementation) => {
   const base = baseImplementation();
   const range = base?.priceRange;
-  const minimum = range?.minValue ?? 98.4;
-  const maximum = range?.maxValue ?? 101.6;
+  const minimum = range?.minValue ?? 99;
+  const maximum = range?.maxValue ?? 101;
   const rawSpan = Math.max(0.01, maximum - minimum);
-  const padding = Math.max(0.18, rawSpan * 0.3);
+  const padding = Math.max(0.16, rawSpan * 0.08);
   return {
     priceRange: {
-      minValue: Math.min(98.4, minimum - padding),
-      maxValue: Math.max(101.6, maximum + padding),
+      minValue: Math.max(0.5, minimum - padding),
+      maxValue: maximum + padding,
     },
   };
 };
@@ -569,6 +575,27 @@ function interpolateMarketCandles(previous: MarketKlineScene, next: MarketKlineS
   };
 }
 
+function interpolateEventTimeline(previous: MarketKlineScene, next: MarketKlineScene, progress: number): MarketKlineScene {
+  const previousByTime = new Map(previous.candles.map((candle) => [candle.time, candle]));
+  const previousClose = previous.candles.at(-1)?.close ?? 100;
+  return {
+    ...next,
+    candles: next.candles.map((candle) => {
+      const before = previousByTime.get(candle.time);
+      if (before) return interpolateMarketCandle(before, candle, progress);
+      const collapsed: MarketCandle = {
+        ...candle,
+        open: previousClose,
+        close: previousClose,
+        high: previousClose,
+        low: previousClose,
+        energy: 0,
+      };
+      return interpolateMarketCandle(collapsed, candle, progress);
+    }),
+  };
+}
+
 function marketActivityLabel(kind: MarketActivityKind, t: ReturnType<typeof useI18n>["t"]): string {
   switch (kind) {
     case "published":
@@ -581,6 +608,8 @@ function marketActivityLabel(kind: MarketActivityKind, t: ReturnType<typeof useI
       return t("Delivery landed", "交付已完成");
     case "blocked":
       return t("Work hit a blocker", "任务被卡住了");
+    case "stagnant":
+      return t("Task became stagnant", "任务进入停滞");
     case "recovered":
       return t("Work started moving again", "任务重新动起来了");
     default:
@@ -600,6 +629,8 @@ function marketPatternLabel(pattern: MarketPattern, t: ReturnType<typeof useI18n
       return t("Delivery added momentum", "交付带来上行动能");
     case "blocker-selloff":
       return t("The blocker added pressure", "阻塞带来下行压力");
+    case "stagnation-plunge":
+      return t("Stagnation pulled the baseline down", "停滞触发基准下移");
     case "recovery-bounce":
       return t("Recovery brought a rebound", "恢复带来反弹");
     case "quiet-drift":
@@ -621,6 +652,8 @@ function MarketActivityGlyph({ kind }: { kind: MarketActivityKind }) {
       return <CheckCircle2 />;
     case "blocked":
       return <CircleAlert />;
+    case "stagnant":
+      return <Clock3 />;
     case "recovered":
       return <RotateCcw />;
     default:
@@ -629,7 +662,7 @@ function MarketActivityGlyph({ kind }: { kind: MarketActivityKind }) {
 }
 
 function marketActivityBadgeVariant(kind: MarketActivityKind): "secondary" | "destructive" | "outline" {
-  if (kind === "blocked") return "destructive";
+  if (kind === "blocked" || kind === "stagnant") return "destructive";
   if (kind === "quiet" || kind === "claimed") return "outline";
   return "secondary";
 }
@@ -641,6 +674,7 @@ function taskIsBlocked(task: Task): boolean {
 }
 
 function markerActivityLabel(marker: MarketTaskMarker, t: ReturnType<typeof useI18n>["t"]): string {
+  if (marker.eventKind === "stagnant") return marketActivityLabel("stagnant", t);
   return taskIsBlocked(marker.task) ? t("Task is blocked", "任务受阻") : marketActivityLabel(marker.eventKind, t);
 }
 
@@ -931,6 +965,7 @@ export function CarbonAnimationBoard({
         <Badge variant="secondary"><Activity data-icon="inline-start" />{t("Working", "工作中")} {model.summary.active}</Badge>
         <Badge variant="secondary"><CheckCircle2 data-icon="inline-start" />{t("Completed", "已完成")} {model.summary.completed}</Badge>
         <Badge variant={model.summary.blocked > 0 ? "destructive" : "secondary"}><CircleAlert data-icon="inline-start" />{t("Blocked", "受阻")} {model.summary.blocked}</Badge>
+        <Badge variant={model.summary.stagnant > 0 ? "destructive" : "secondary"}><Clock3 data-icon="inline-start" />{t("Stagnant", "停滞")} {model.summary.stagnant}</Badge>
         <Badge variant="outline"><Clock3 data-icon="inline-start" />{t("Waiting", "待处理")} {model.summary.queued}</Badge>
       </div>
 
@@ -1222,7 +1257,7 @@ function MarketKlineCanvas({
       },
       rightPriceScale: {
         borderColor: palette.border,
-        scaleMargins: { top: 0.12, bottom: 0.24 },
+        scaleMargins: { top: 0.1, bottom: 0.2 },
       },
       leftPriceScale: { visible: false },
       timeScale: {
@@ -1253,9 +1288,8 @@ function MarketKlineCanvas({
       priceLineColor: palette.muted,
       priceLineStyle: LineStyle.Dashed,
       lastValueVisible: true,
-      // Task events are deliberately local around a 100 reference. A fixed
-      // floor and breathable padding stop one small period from looking like a
-      // full-screen crash while a wider period uses the same visual baseline.
+      // The range follows real event values: ordinary work stays near 100 while
+      // stagnation may legitimately drive the structural baseline down to 1.
       autoscaleInfoProvider: stableMarketAutoscaleInfo,
     });
     const volume = chart.addSeries(HistogramSeries, {
@@ -1265,7 +1299,7 @@ function MarketKlineCanvas({
     });
     // Preserve a thin, quiet volume pane; its values are visually compressed
     // before reaching this series, while the readout keeps the original number.
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.88, bottom: 0 } });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.91, bottom: 0 } });
     const markers = createSeriesMarkers(candles, [], { autoScale: false, zOrder: "aboveSeries" });
     const refs: MarketChartRefs = { chart, candles, volume, markers };
     chartRefs.current = refs;
@@ -1328,14 +1362,14 @@ function MarketKlineCanvas({
     const previousLiveCandle = previous?.candles.at(-1);
     const liveCandle = scene.candles.at(-1);
     const hasStableTimeline = previous ? sameCandleTimeline(previous, scene) : false;
-    if (previous && previousLiveCandle && liveCandle && hasStableTimeline) {
+    if (previous && previousLiveCandle && liveCandle) {
       if (prefersReducedMotion) {
         setMarketSeriesData(refs, scene, palette);
         setAnimatedPrice(scene.currentPrice);
       } else {
         const startedAt = performance.now();
-        const onlyLiveCandleChanged = canUpdateOnlyLiveCandle(previous, scene);
-        const authoredDuration = onlyLiveCandleChanged ? 360 : 420;
+        const onlyLiveCandleChanged = hasStableTimeline && canUpdateOnlyLiveCandle(previous, scene);
+        const authoredDuration = onlyLiveCandleChanged ? 360 : hasStableTimeline ? 420 : 560;
         const duration = Math.min(1_600, Math.max(150, Math.round(authoredDuration * 100 / styleMetadata.speed)));
         const animate = (now: number) => {
           const progress = Math.min(1, Math.max(0, (now - startedAt) / duration));
@@ -1343,8 +1377,12 @@ function MarketKlineCanvas({
             const interpolated = interpolateMarketCandle(previousLiveCandle, liveCandle, progress);
             updateLiveCandle(refs, interpolated, palette);
             setAnimatedPrice(interpolated.close);
-          } else {
+          } else if (hasStableTimeline) {
             const interpolated = interpolateMarketCandles(previous, scene, progress);
+            setMarketSeriesData(refs, interpolated, palette);
+            setAnimatedPrice(interpolated.candles.at(-1)?.close ?? scene.currentPrice);
+          } else {
+            const interpolated = interpolateEventTimeline(previous, scene, progress);
             setMarketSeriesData(refs, interpolated, palette);
             setAnimatedPrice(interpolated.candles.at(-1)?.close ?? scene.currentPrice);
           }
@@ -1440,7 +1478,7 @@ function MarketKlineCanvas({
     driverCandle?.cause === "mixed" ? (scene.dominantEvent ?? "quiet") : (driverCandle?.cause ?? "quiet")
   );
   const driverPattern = driverMarker?.pattern ?? driverCandle?.pattern ?? scene.currentPattern;
-  const driverTaskIsBlocked = Boolean(driverMarker && taskIsBlocked(driverMarker.task));
+  const driverTaskIsBlocked = driverMarker?.eventKind === "blocked";
   const rawBullForce = Math.max(0, driverCandle?.bullForce ?? 0) + Math.max(0, driverMarker?.force ?? 0);
   const rawBearForce = Math.max(0, driverCandle?.bearForce ?? 0) + Math.max(0, -(driverMarker?.force ?? 0));
   const forceTotal = rawBullForce + rawBearForce;
@@ -1477,6 +1515,7 @@ function MarketKlineCanvas({
             <span><i data-state="active" />{t("Working", "工作")} {scene.summary.active}</span>
             <span><i data-state="completed" />{t("Done", "完成")} {scene.summary.completed}</span>
             <span><i data-state="blocked" />{t("Blocked", "阻塞")} {scene.summary.blocked}</span>
+            <span><i data-state="stagnant" />{t("Stagnant", "停滞")} {scene.summary.stagnant}</span>
             <span><i data-state="queued" />{t("Waiting", "待处理")} {scene.summary.queued}</span>
           </div>
         </div>
@@ -1562,7 +1601,7 @@ function MarketKlineCanvas({
             <span className="carbon-market-driver-icon" aria-hidden><CircleDotDashed /></span>
             <span className="carbon-market-driver-copy">
               <span className="carbon-market-driver-kicker">{marketActivityLabel("quiet", t)} · {marketPatternLabel("quiet-drift", t)}</span>
-              <span className="carbon-market-driver-task">{t("Nothing new happened here, so the market is only breathing gently.", "这段时间没有新的任务动作，行情只是在轻轻呼吸。")}</span>
+              <span className="carbon-market-driver-task">{t("No task action has produced a chart point yet.", "还没有任务动作可以绘制，时间轴保持为空。")}</span>
             </span>
           </div>
         )}
@@ -1592,6 +1631,13 @@ function MarketKlineCanvas({
         onKeyDown={onChartKeyDown}
       >
         <div ref={containerRef} className="carbon-market-chart" />
+        {scene.candles.length === 0 && (
+          <div className="carbon-market-empty-tape">
+            <CircleDotDashed />
+            <strong>{t("No task activity yet", "暂无任务动作")}</strong>
+            <span>{t("Carbon will add a point when a task is created, claimed, updated, blocked, completed, or becomes stagnant.", "创建、认领、推进、阻塞、完成或进入停滞时，Carbon 才会在这里增加一个时间点。")}</span>
+          </div>
+        )}
         <div className="carbon-market-readout" aria-label={t("OHLC and volume", "开高低收与量能") }>
           {displayCandle && (
             <>
@@ -1672,10 +1718,10 @@ function MarketKlineCanvas({
               >
                 <span className="carbon-market-event-position">{selectedPosition}/{scene.markers.length}</span>
                 <span className="carbon-market-marker-dot" data-event={selectedMarker.eventKind} aria-hidden />
-                <Badge variant={taskIsBlocked(selectedMarker.task) ? "destructive" : marketActivityBadgeVariant(selectedMarker.eventKind)}>{markerActivityLabel(selectedMarker, t)}</Badge>
+                <Badge variant={selectedMarker.eventKind === "blocked" ? "destructive" : marketActivityBadgeVariant(selectedMarker.eventKind)}>{markerActivityLabel(selectedMarker, t)}</Badge>
                 <span className="carbon-market-event-id">{selectedMarker.task.id}</span>
                 <span className="carbon-market-event-title">{selectedMarker.task.title}</span>
-                <span className="carbon-market-event-meta">{taskIsBlocked(selectedMarker.task) ? "" : `${marketPatternLabel(selectedMarker.pattern, t)} · `}{t("Energy", "量能")} {selectedMarker.energy}</span>
+                <span className="carbon-market-event-meta">{selectedMarker.eventKind === "blocked" ? "" : `${marketPatternLabel(selectedMarker.pattern, t)} · `}{t("Energy", "量能")} {selectedMarker.energy}</span>
                 <ChevronRight data-icon="inline-end" />
               </Button>
             </MarketTaskPreviewPopover>

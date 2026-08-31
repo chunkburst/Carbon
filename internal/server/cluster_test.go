@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"carbon/internal/cluster"
 	"carbon/internal/mcp"
@@ -107,9 +108,37 @@ func TestClusterSummarySeparatesSameTaskIDAcrossProjects(t *testing.T) {
 		t.Fatalf("projects = %+v", got.Projects)
 	}
 	for _, project := range got.Projects {
-		if project.Tasks != 1 || project.Active != 1 || project.Stalled != 0 || project.Review != 0 || project.LiveAgents != 1 {
+		if project.Tasks != 1 || project.Active != 1 || project.Stalled != 0 || project.Stagnant != 0 || project.Review != 0 || project.LiveAgents != 1 {
 			t.Fatalf("summary for %s = %+v; duplicate task ids must not merge", project.Path, project)
 		}
+	}
+}
+
+func TestClusterSummaryCountsTaskStagnationSeparatelyFromSessionStalls(t *testing.T) {
+	clusterRoot := t.TempDir()
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Init(project, "OLD"); err != nil {
+		t.Fatal(err)
+	}
+	writeClusterTaskAt(t, project, "OLD-1", time.Now().UTC().Add(-48*time.Hour))
+
+	s := New(clusterRoot, "human:test")
+	h := s.Handler()
+	call(t, h, "POST", "/api/cluster", clusterJSON(t, clusterReq{Path: clusterRoot}), &clusterResp{})
+	var updated clusterResp
+	call(t, h, "POST", "/api/cluster/projects", clusterJSON(t, clusterProjectReq{ClusterPath: clusterRoot, Path: project}), &updated)
+
+	var got clusterResp
+	call(t, h, "GET", clusterURL(clusterRoot), "", &got)
+	if len(got.Projects) != 1 {
+		t.Fatalf("projects = %+v", got.Projects)
+	}
+	view := got.Projects[0]
+	if view.Tasks != 1 || view.Stagnant != 1 || view.Stalled != 0 || view.Active != 0 {
+		t.Fatalf("task stagnation was conflated with session stall: %+v", view)
 	}
 }
 
@@ -254,13 +283,17 @@ func snapshotTree(t *testing.T, root string) map[string][]byte {
 }
 
 func writeClusterTask(t *testing.T, root, id string) {
+	writeClusterTaskAt(t, root, id, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+}
+
+func writeClusterTaskAt(t *testing.T, root, id string, at time.Time) {
 	t.Helper()
 	body := "---\n" +
 		"id: " + id + "\n" +
 		"title: same task id\n" +
 		"status: backlog\n" +
 		"provenance:\n" +
-		"  - {who: human:test, at: 2026-01-01T00:00:00Z, did: created}\n" +
+		"  - {who: human:test, at: " + at.UTC().Format(time.RFC3339) + ", did: created}\n" +
 		"---\n"
 	if err := os.WriteFile(filepath.Join(root, repo.CarbonDirName, "tasks", id+".md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)

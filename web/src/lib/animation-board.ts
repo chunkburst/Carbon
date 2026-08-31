@@ -5,16 +5,17 @@ import {
   type AnimationStyleMetadata,
   type MarketTimeframe,
 } from "./personalization.ts";
+import { buildTaskEventMarketScene } from "./task-event-market.ts";
 
 export type AnimationTaskState = "active" | "completed" | "blocked" | "queued";
-export type MarketRegime = "success" | "idle" | "blocked" | "all-active";
-export type MarketActivityKind = "published" | "claimed" | "processing" | "completed" | "blocked" | "recovered" | "quiet";
-export type MarketPattern = "publish-volatility" | "claim-compression" | "processing-contest" | "completion-rally" | "blocker-selloff" | "recovery-bounce" | "quiet-drift" | "mixed-flow";
+export type MarketRegime = "success" | "idle" | "blocked" | "stagnant" | "all-active";
+export type MarketActivityKind = "published" | "claimed" | "processing" | "completed" | "blocked" | "stagnant" | "recovered" | "quiet";
+export type MarketPattern = "publish-volatility" | "claim-compression" | "processing-contest" | "completion-rally" | "blocker-selloff" | "stagnation-plunge" | "recovery-bounce" | "quiet-drift" | "mixed-flow";
 export type MarketCandleCause = MarketActivityKind | "mixed";
 
 export type AnimationBoardInput = {
   tasks: readonly Task[];
-  status: Pick<Status, "states" | "closed" | "initial">;
+  status: Pick<Status, "states" | "closed" | "initial" | "taskStagnationAfterSeconds">;
   /** Stable project scope for market seeding. Omit only for legacy callers. */
   projectKey?: string;
   /** Candle period for the task market. Defaults to the balanced one-hour tape. */
@@ -30,6 +31,7 @@ export type AnimationBoardSummary = {
   active: number;
   completed: number;
   blocked: number;
+  stagnant: number;
   queued: number;
   allInProgress: boolean;
 };
@@ -122,6 +124,9 @@ export type MarketKlineScene = {
   markers: MarketTaskMarker[];
   dominantEvent?: MarketActivityKind;
   currentPattern: MarketPattern;
+  /** Current task-health pressure. Five or more stagnant tasks settle at 1. */
+  stagnantCount: number;
+  structuralPrice: number;
 };
 
 export type AnimationBoardModel = PixelAgentsScene | MarketKlineScene;
@@ -231,9 +236,11 @@ export function summarizeAnimationBoard(input: Pick<AnimationBoardInput, "tasks"
   let active = 0;
   let completed = 0;
   let blocked = 0;
+  let stagnant = 0;
   let queued = 0;
 
   for (const task of input.tasks) {
+    if (task.activityHealth === "stagnant") stagnant += 1;
     switch (animationTaskState(task, input.status)) {
       case "active":
         active += 1;
@@ -254,6 +261,7 @@ export function summarizeAnimationBoard(input: Pick<AnimationBoardInput, "tasks"
     active,
     completed,
     blocked,
+    stagnant,
     queued,
     allInProgress: input.tasks.length > 0 && input.tasks.every(taskIsWorking),
   };
@@ -337,6 +345,7 @@ export function buildPixelAgentsScene(input: AnimationBoardInput): PixelAgentsSc
 }
 
 export function marketRegime(summary: AnimationBoardSummary): MarketRegime {
+  if (summary.stagnant > 0) return "stagnant";
   if (summary.blocked > 0) return "blocked";
   if (summary.allInProgress) return "all-active";
   if (summary.completed > 0) return "success";
@@ -521,9 +530,8 @@ function floorToMarketBar(time: number, step: number): number {
 }
 
 /**
- * A market viewport is always exactly 96 real bars. Its last bar is the one
- * immediately after the latest known event, leaving a live candle at the edge
- * without changing the selected period to make old history fit.
+ * The legacy market caps its viewport at 96 bars. The current event market
+ * keeps the same cap while omitting empty wall-clock buckets entirely.
  */
 function buildMarketTimeline(events: readonly MarketActivityEvent[], step: number): MarketTimeline {
   const actualTimes = events.flatMap((event) => event.time === undefined ? [] : [event.time]);
@@ -1030,7 +1038,7 @@ function dominantActivity(markers: readonly PreparedMarketMarker[]): MarketActiv
  * contributes a bounded force window (rather than changing a cumulative score),
  * so publishing, work, delivery, setbacks, and recovery read like a liquid tape.
  */
-export function buildMarketKlineScene(input: AnimationBoardInput): MarketKlineScene {
+export function buildLegacyMarketKlineScene(input: AnimationBoardInput): MarketKlineScene {
   const summary = summarizeAnimationBoard(input);
   const regime = marketRegime(summary);
   const tick = finiteTick(input.tick);
@@ -1168,7 +1176,15 @@ export function buildMarketKlineScene(input: AnimationBoardInput): MarketKlineSc
     markers,
     dominantEvent: dominantActivity(preparedMarkers),
     currentPattern: candles.at(-1)?.pattern ?? "quiet-drift",
+    stagnantCount: summary.stagnant,
+    structuralPrice: Math.max(1, 100 - summary.stagnant * 20),
   };
+}
+
+/** The current task market uses real task events and omits empty wall-clock bars. */
+export function buildMarketKlineScene(input: AnimationBoardInput): MarketKlineScene {
+  const summary = summarizeAnimationBoard(input);
+  return buildTaskEventMarketScene(input, summary);
 }
 
 /**

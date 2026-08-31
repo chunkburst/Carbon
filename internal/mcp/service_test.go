@@ -48,6 +48,63 @@ func TestCreateAndGet(t *testing.T) {
 	}
 }
 
+func TestTaskActivityHealthUsesMeaningfulProvenanceAndConfiguredWindow(t *testing.T) {
+	base := time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)
+	now := base
+	svc := service(t, "agent:activity")
+	svc.now = func() time.Time { return now }
+
+	doc, err := svc.Create(store.Draft{Title: "observed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A bookkeeping lease renewal must not hide a task that has had no real work
+	// since creation. It is deliberately newer than the creation provenance.
+	if err := doc.AppendProvenance("agent:activity", "session lease renewed", "lease_id=lease_1", base.Add(23*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := svc.store.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now = base.Add(24*time.Hour - time.Second)
+	fresh := deriveTaskActivity(doc.Task, doc.Provenance, cfg, svc.now())
+	if fresh.Health != ActivityHealthFresh || fresh.LastMeaningfulAt != base.Format(time.RFC3339) || fresh.StagnantAt != base.Add(24*time.Hour).Format(time.RFC3339) {
+		t.Fatalf("23:59:59 activity = %+v", fresh)
+	}
+
+	now = base.Add(24 * time.Hour)
+	stagnant := deriveTaskActivity(doc.Task, doc.Provenance, cfg, svc.now())
+	if stagnant.Health != ActivityHealthStagnant {
+		t.Fatalf("24h activity = %+v, want stagnant", stagnant)
+	}
+
+	if err := doc.SetStatus("done"); err != nil {
+		t.Fatal(err)
+	}
+	closed := deriveTaskActivity(doc.Task, doc.Provenance, cfg, svc.now())
+	if closed.Health == ActivityHealthStagnant {
+		t.Fatalf("closed task reported stagnant: %+v", closed)
+	}
+
+	cfg.TaskStagnationAfter = 60 * 60
+	now = base.Add(59*time.Minute + 59*time.Second)
+	if explicit := deriveTaskActivity(task.Task{Status: "in_progress"}, doc.Provenance, cfg, svc.now()); explicit.Health != ActivityHealthFresh {
+		t.Fatalf("explicit 1h window before boundary = %+v", explicit)
+	}
+	now = base.Add(time.Hour)
+	if explicit := deriveTaskActivity(task.Task{Status: "in_progress"}, doc.Provenance, cfg, svc.now()); explicit.Health != ActivityHealthStagnant {
+		t.Fatalf("explicit 1h window at boundary = %+v", explicit)
+	}
+
+	unknown := deriveTaskActivity(task.Task{Status: "in_progress"}, nil, cfg, svc.now())
+	if unknown.Health != ActivityHealthUnknown || unknown.LastMeaningfulAt != "" || unknown.StagnantAt != "" {
+		t.Fatalf("missing provenance activity = %+v", unknown)
+	}
+}
+
 func TestCreateRejectsBlankTitle(t *testing.T) {
 	svc := service(t, "agent:a")
 	if _, err := svc.Create(store.Draft{Title: "  "}); !errors.Is(err, ErrEmptyTitle) {

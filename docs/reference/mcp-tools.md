@@ -84,6 +84,7 @@ reference and leaves the previous selection unchanged on failure.
 | `create`, `update`, `reorder`, `transition`, `delete` | Create and manage ordinary task state. |
 | `list_types`, `create_type` | Read or add reusable task types. |
 | `worker_identity_get`, `worker_identity_list`, `worker_identity_claim` | Read or claim a stable Worker role and one or more task types when Identity Mode is enabled. |
+| `subscription_initialize`, `events_poll` | Create an Agent-owned selected-project task/Incident subscription and durably poll its safe event summaries. |
 | `run_checks`, `attest` | Run command checks or record a manual check result. |
 | `note`, `edit_note`, `delete_note` | Maintain concise task provenance. |
 
@@ -103,6 +104,37 @@ or assignment; use the dedicated bulk/lease operations where the change is permi
 reason and current `expected_version`; a conflict becomes a pending request rather than silently
 replacing a holder. With Identity Mode enabled, an Agent must have an identity whose `types`
 contains the typed task it is about to execute. Human/system administration remains available.
+
+## Event subscriptions
+
+Event subscriptions are an Agent's selected-project delivery preference; they are not shared
+project configuration and are unavailable to legacy, Home-only, or cluster-only scopes.
+They intentionally separate result-oriented task activity from process-oriented Incidents.
+The durable ledger contains only safe routing metadata (IDs, time, module, action, actor,
+status/type/importance or Incident severity/kind), never task bodies, Incident bodies, Work Log
+text, or Incident reply text.
+
+| Tool | Required inputs | Result |
+| --- | --- | --- |
+| `subscription_initialize` | `subscription_id`, `idempotency_key`, `mode`, `modules` | Creates or deliberately updates one selected-project subscription. `modules` contains one or both of `tasks`, `incidents`; optional task filters are `statuses`, `types`, `importances`, and optional Incident filters are `statuses`, `severities`, `kinds`. Empty filter arrays mean no filter. |
+| `events_poll` | `subscription_id` | Returns safe events after an optional signed `cursor`. `limit` is 1-200 (default 50); `wait_ms` is 0-30000 and is cancellable. |
+
+Initialization is repeatable. Reusing an `idempotency_key` with the identical request returns the
+same subscription/cursor; reusing it with different content is rejected. Changing an existing
+subscription requires a **new** key plus its current `expected_version`. This deliberate update is
+also the resync path after an expired cursor and begins at the current ledger tail.
+
+The returned cursor is signed for exactly `{project, actor, subscription}` and must be persisted by
+the caller. Sending it on the next poll acknowledges delivery; until then the same events may be
+safely redelivered after a client crash. A cursor from another selected project, Agent, or
+subscription is rejected. If a slow subscriber falls behind bounded retained history, polling
+returns `cursor expired`; re-run `subscription_initialize` with a new idempotency key and current
+`expected_version` rather than silently skipping history.
+
+`mode` records the requested policy (`passive`, `mixed`, or `active`). Carbon v2 currently returns
+`effectiveDelivery: "poll"` and `pushSupported: false` for every mode: this MCP session has no
+verified automatic-wake transport. `events_poll` remains authoritative across restart; neither a
+long poll nor a UI notification should be interpreted as Agent push delivery.
 
 ## Planning, recovery, and audit
 

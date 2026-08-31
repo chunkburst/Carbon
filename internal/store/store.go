@@ -691,8 +691,8 @@ func (d *Doc) SetCheckResult(i int, result string) error {
 
 // AppendProvenance appends one audit entry to the provenance sequence, creating it if
 // absent (SPEC §7: every write appends one). Entries are flow-style for clean diffs. Note
-// entries get a stable id (so they can be edited/deleted later); system entries stay
-// byte-identical to before this capability was added.
+// entries get a stable id (so they can be edited/deleted later); ordinary system entries
+// remain byte-identical to before this capability was added.
 func (d *Doc) AppendProvenance(who, did, text string, at time.Time) error {
 	m := d.mapping()
 	seq, ok := mapGet(m, "provenance")
@@ -717,6 +717,32 @@ func (d *Doc) AppendProvenance(who, did, text string, at time.Time) error {
 	seq.Content = append(seq.Content, entry)
 	d.Provenance = append(d.Provenance, Provenance{ID: id, Who: who, At: at.UTC().Format(time.RFC3339), Did: did, Text: text})
 	return nil
+}
+
+// EnsureLastProvenanceID gives the newest source mutation a durable identity without
+// changing historical system entries. Carbon's event-ledger recovery uses this narrow
+// opt-in after a service has decided that a task mutation is externally subscribable.
+// It must be called before the document is saved.
+func (d *Doc) EnsureLastProvenanceID() (string, error) {
+	if d == nil || len(d.Provenance) == 0 {
+		return "", fmt.Errorf("store: no provenance entry to identify")
+	}
+	last := len(d.Provenance) - 1
+	if id := d.Provenance[last].ID; id != "" {
+		return id, nil
+	}
+	seq, ok := mapGet(d.mapping(), "provenance")
+	if !ok || seq.Kind != yaml.SequenceNode || last >= len(seq.Content) || seq.Content[last].Kind != yaml.MappingNode {
+		return "", fmt.Errorf("store: provenance node is unavailable")
+	}
+	id, err := mintNoteID()
+	if err != nil {
+		return "", err
+	}
+	entry := seq.Content[last]
+	entry.Content = append([]*yaml.Node{strNode("id"), strNode(id)}, entry.Content...)
+	d.Provenance[last].ID = id
+	return id, nil
 }
 
 // findProvenance locates the provenance sequence node and the index of the target entry,
@@ -953,7 +979,7 @@ func (d ExplicitDraft) legacy() Draft {
 }
 
 func (s *Store) Create(draft Draft, actor string, at time.Time) (*Doc, error) {
-	return s.create(context.Background(), draft, actor, at, false, nil)
+	return s.create(context.Background(), draft, actor, at, false, nil, nil)
 }
 
 // CreateExplicit creates through the strict Carbon primitive. Type and Importance must
@@ -961,17 +987,27 @@ func (s *Store) Create(draft Draft, actor string, at time.Time) (*Doc, error) {
 // into importance. It uses the wall clock because explicit API callers do not inject a
 // testing clock; the legacy Create remains available for deterministic tests.
 func (s *Store) CreateExplicit(ctx context.Context, actor string, draft ExplicitDraft) (*Doc, error) {
-	return s.create(ctx, draft.legacy(), actor, time.Now(), true, nil)
+	return s.create(ctx, draft.legacy(), actor, time.Now(), true, nil, nil)
 }
 
 // CreateExplicit creates a strict Carbon task while the caller already holds this
 // store's write transaction. It lets compound workflows validate their input and
 // create a task beneath one repository lock instead of opening a second transaction.
 func (tx *WriteTx) CreateExplicit(actor string, draft ExplicitDraft, at time.Time) (*Doc, error) {
-	return tx.store.create(context.Background(), draft.legacy(), actor, at, true, tx)
+	return tx.store.create(context.Background(), draft.legacy(), actor, at, true, tx, nil)
 }
 
-func (s *Store) create(ctx context.Context, draft Draft, actor string, at time.Time, strict bool, existing *WriteTx) (*Doc, error) {
+// CreateExplicitWithBeforeSave is the strict creation primitive for one bounded
+// compound workflow. The hook runs under the caller's WriteTx after the initial
+// provenance record exists but before the task itself is persisted.
+func (tx *WriteTx) CreateExplicitWithBeforeSave(actor string, draft ExplicitDraft, at time.Time, beforeSave func(*Doc) error) (*Doc, error) {
+	if beforeSave == nil {
+		return tx.CreateExplicit(actor, draft, at)
+	}
+	return tx.store.create(context.Background(), draft.legacy(), actor, at, true, tx, beforeSave)
+}
+
+func (s *Store) create(ctx context.Context, draft Draft, actor string, at time.Time, strict bool, existing *WriteTx, beforeSave func(*Doc) error) (*Doc, error) {
 	var created *Doc
 	create := func(tx *WriteTx) error {
 		cfg, err := tx.Config()
@@ -1077,6 +1113,11 @@ func (s *Store) create(ctx context.Context, draft Draft, actor string, at time.T
 
 		if err := d.AppendProvenance(actor, "created", "", at); err != nil {
 			return err
+		}
+		if beforeSave != nil {
+			if err := beforeSave(d); err != nil {
+				return err
+			}
 		}
 		if err := tx.SaveTask(d); err != nil {
 			return err

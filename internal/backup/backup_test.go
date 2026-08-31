@@ -136,7 +136,7 @@ func TestCreateIsIdempotentAndObjectsAreImmutable(t *testing.T) {
 	}
 }
 
-func TestNewRepositoryUsesV100AsDefaultAppVersion(t *testing.T) {
+func TestNewRepositoryUsesCurrentDefaultAppVersion(t *testing.T) {
 	source := t.TempDir()
 	writeTestFile(t, filepath.Join(source, "file.txt"), []byte("current product version"), 0o600)
 
@@ -152,8 +152,8 @@ func TestNewRepositoryUsesV100AsDefaultAppVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.AppVersion != "1.0.0" || DefaultAppVersion != "1.0.0" {
-		t.Fatalf("default snapshot app version = %q (constant %q), want 1.0.0", manifest.AppVersion, DefaultAppVersion)
+	if manifest.AppVersion != "1.1.2" || DefaultAppVersion != "1.1.2" {
+		t.Fatalf("default snapshot app version = %q (constant %q), want 1.1.2", manifest.AppVersion, DefaultAppVersion)
 	}
 }
 

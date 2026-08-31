@@ -4,6 +4,7 @@ import {
   Activity,
   Bookmark,
   CircleDashed,
+  ClipboardCheck,
   ClockAlert,
   FilePlus2,
   HelpCircle,
@@ -12,6 +13,7 @@ import {
   ListChecks,
   Network,
   Moon,
+  MessagesSquare,
   Plug,
   ScanEye,
   Search,
@@ -62,6 +64,8 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { OwnerLogs } from "@/pages/OwnerLogs";
+import { Incidents } from "@/pages/Incidents";
+import { ReviewCenter } from "@/pages/ReviewCenter";
 import { Trash } from "@/pages/Trash";
 import { CarbonTaskDetailPage } from "@/pages/CarbonTaskDetailPage";
 import { WorkLogs } from "@/pages/WorkLogs";
@@ -75,6 +79,7 @@ import {
   useBulkCarbonPatch,
   useBulkCarbonMove,
   useCarbonCapabilities,
+  useCarbonConfig,
   useCarbonSearch,
   useCarbonSavedViews,
   useCarbonTaskTypes,
@@ -104,7 +109,7 @@ import { WorkerAliasProvider } from "@/lib/worker-aliases";
 import { cn, statusLabel } from "@/lib/utils";
 import { addView, loadViews, removeView, type SavedView } from "@/lib/views";
 
-type CarbonView = "board" | "graph" | "workers" | "work-logs" | "owner-logs" | "trash";
+type CarbonView = "board" | "graph" | "workers" | "work-logs" | "owner-logs" | "incidents" | "reviews" | "trash";
 type TaskScope = "project" | "cluster";
 
 type CarbonWorkspaceProps = {
@@ -149,7 +154,7 @@ function useDebouncedValue<T>(value: T, delay = 180): T {
   return debounced;
 }
 
-function carbonWorkflowStatus(home: string, tasks: Task[]): Status {
+function carbonWorkflowStatus(home: string, tasks: Task[], taskStagnationAfterSeconds?: number): Status {
   const defaults = ["backlog", "ready", "in_progress", "review", "done"];
   const discovered = tasks.map((task) => task.status).filter(Boolean);
   const states = [...new Set([...defaults, ...discovered])];
@@ -161,6 +166,7 @@ function carbonWorkflowStatus(home: string, tasks: Task[]): Status {
     initial: "backlog",
     states,
     closed: states.filter((state) => CLOSED_STATES.has(state.toLowerCase())),
+    taskStagnationAfterSeconds,
   };
 }
 
@@ -228,9 +234,16 @@ export function CarbonWorkspace({
   // The opt-in market history contains only action, actor, and timestamp. Task/log
   // text stays out of this list response while the animation view gains real causes.
   const taskQuery = useCarbonTasks(boardScope, false, true, true);
+  const configQuery = useCarbonConfig(boardScope);
   useCarbonTaskEvents(boardScope);
   const tasks = useMemo(() => taskQuery.data?.available ? taskQuery.data.data.tasks ?? [] : [], [taskQuery.data]);
-  const status = useMemo(() => carbonWorkflowStatus(home, tasks), [home, tasks]);
+  const taskStagnationAfterSeconds = configQuery.data?.available
+    ? configQuery.data.data.taskStagnationAfterSeconds
+    : undefined;
+  const status = useMemo(
+    () => carbonWorkflowStatus(home, tasks, taskStagnationAfterSeconds),
+    [home, taskStagnationAfterSeconds, tasks],
+  );
   const boardTasks = useMemo(
     () => tasks.filter((task) => matches(task, sidebarFilter, status)),
     [sidebarFilter, status, tasks],
@@ -269,14 +282,16 @@ export function CarbonWorkspace({
   ];
   const agentWorkNav: { id: Extract<Filter, "active" | "stalled" | "review">; label: string; icon: typeof ListTodo }[] = [
     { id: "active", label: t("Active", "进行中"), icon: Activity },
-    { id: "stalled", label: t("Stalled", "已停滞"), icon: ClockAlert },
-    { id: "review", label: t("Awaiting review", "等待审核"), icon: ScanEye },
+    { id: "stalled", label: t("Stagnant", "停滞"), icon: ClockAlert },
+    { id: "review", label: t("Tasks awaiting review", "待审核任务"), icon: ScanEye },
   ];
   const nav: { id: CarbonView; label: string; icon: typeof KanbanSquare }[] = [
     { id: "board", label: t("Board", "看板"), icon: KanbanSquare },
     { id: "graph", label: t("Graph", "依赖图"), icon: Network },
     { id: "workers", label: t("Agents", "智能体团队"), icon: UsersRound },
     { id: "work-logs", label: t("Work logs", "工作日志"), icon: ListChecks },
+    { id: "incidents", label: t("Incidents", "事件"), icon: MessagesSquare },
+    { id: "reviews", label: t("Review center", "审核中心"), icon: ClipboardCheck },
     { id: "trash", label: t("Trash", "回收站"), icon: Trash2 },
   ];
 
@@ -681,6 +696,8 @@ export function CarbonWorkspace({
           ))}
           {activeView === "work-logs" && <WorkLogs home={home} carbonScope={scope} clusters={clusters} allowClusterScope={Boolean(cluster)} onOpenWorker={openWorker} onOpenTask={openTaskTarget} />}
           {activeView === "owner-logs" && <OwnerLogs home={home} carbonScope={scope} onOpenWorker={openWorker} onOpenTask={openTaskTarget} />}
+          {activeView === "incidents" && <Incidents scope={scope} tasks={tasks.filter((task) => !task.projectId || task.projectId === project.id)} currentActor={actor} onOpenTask={openTask} />}
+          {activeView === "reviews" && <ReviewCenter scope={scope} tasks={tasks.filter((task) => !task.projectId || task.projectId === project.id)} onOpenTask={openTask} />}
           {activeView === "trash" && <Trash carbonScope={clusterScope} projects={workspaceProjects} />}
             </>
           )}
