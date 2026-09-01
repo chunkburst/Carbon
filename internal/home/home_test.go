@@ -703,10 +703,22 @@ func TestResolveProjectByIDRejectsReusedSourceDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Allocate the replacement while the original source still exists. A delete followed
+	// immediately by Mkdir can legally reuse the same POSIX inode, which would not be a
+	// distinct filesystem identity for this test to resolve.
+	replacement := filepath.Join(sourceParent, "replacement")
+	if err := os.Mkdir(replacement, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, replacementFingerprint, err := observeSource(replacement); err != nil {
+		t.Fatal(err)
+	} else if replacementFingerprint == project.Source.Fingerprint {
+		t.Fatal("preallocated replacement unexpectedly shares the original source identity")
+	}
 	if err := os.Remove(source); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(source, 0o755); err != nil {
+	if err := os.Rename(replacement, source); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ResolveProject(main, ResolveProjectRequest{ClusterID: cluster.ID, ProjectID: project.ID}); !errors.Is(err, ErrProjectSourceMismatch) {
